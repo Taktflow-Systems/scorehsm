@@ -6,9 +6,13 @@
 //!
 //! Frame format (§2.1 of architecture.md):
 //! ```text
-//! [MAGIC:2][CMD:1][SEQ:1][LEN:2LE][PAYLOAD:LEN][CRC16:2LE]
+//! [MAGIC:2][CMD:1][SEQ:1][LEN:2LE][PAYLOAD:LEN][CRC32:4LE]
 //! ```
-//! MAGIC = 0xAB 0xCD; CRC-16/CCITT poly=0x1021 init=0xFFFF.
+//! MAGIC = 0xAB 0xCD; CRC-32/MPEG-2 poly=0x04C11DB7 init=0xFFFFFFFF no-reflect no-XorOut.
+//!
+//! CRC-32/MPEG-2 is specified in TSR-TIG-01 (HSM-REQ-050). The 32-bit width gives
+//! Hamming distance ≥4 for frames up to 512 bytes, satisfying the ASIL B transport
+//! integrity requirement (FSR-08).
 
 use std::sync::Mutex;
 use serialport::SerialPort;
@@ -22,9 +26,12 @@ use crate::{
 
 // ── Protocol constants (must match firmware/src/protocol.rs) ─────────────────
 
-const MAGIC: [u8; 2]     = [0xAB, 0xCD];
-const MAX_PAYLOAD: usize  = 512;
-const FRAME_OVERHEAD: usize = 8;
+const MAGIC: [u8; 2]        = [0xAB, 0xCD];
+const MAX_PAYLOAD: usize    = 512;
+/// Fixed header (6 B) + CRC-32 trailer (4 B).
+const FRAME_OVERHEAD: usize = 10;
+/// Length of the fixed frame header: [MAGIC:2][CMD:1][SEQ:1][LEN:2].
+const HDR_LEN: usize = 6;
 
 #[repr(u8)]
 #[allow(dead_code)]
@@ -88,21 +95,34 @@ impl TryFrom<u8> for Rsp {
     }
 }
 
-// ── CRC-16/CCITT ─────────────────────────────────────────────────────────────
+// ── CRC-32/MPEG-2 (TSR-TIG-01, HSM-REQ-050) ──────────────────────────────────
+//
+// Parameters: poly=0x04C11DB7, init=0xFFFFFFFF, RefIn=false, RefOut=false,
+// XorOut=0x00000000.  KAT: crc32_mpeg2(&[0x00;4]) == 0x2144_DF1C.
 
-fn crc16(data: &[u8]) -> u16 {
-    let mut crc: u16 = 0xFFFF;
+fn crc32_mpeg2(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0xFFFF_FFFF;
     for &b in data {
-        crc ^= (b as u16) << 8;
+        crc ^= (b as u32) << 24;
         for _ in 0..8 {
-            if crc & 0x8000 != 0 {
-                crc = (crc << 1) ^ 0x1021;
+            if crc & 0x8000_0000 != 0 {
+                crc = (crc << 1) ^ 0x04C1_1DB7;
             } else {
                 crc <<= 1;
             }
         }
     }
     crc
+}
+
+#[cfg(test)]
+mod crc_kat {
+    use super::crc32_mpeg2;
+    /// KAT from TSR-TIG-01 / QT-FSR-08-a: CRC-32/MPEG-2 of four zero bytes.
+    #[test]
+    fn crc32_mpeg2_known_answer() {
+        assert_eq!(crc32_mpeg2(&[0x00; 4]), 0x2144_DF1C);
+    }
 }
 
 // ── Inner state protected by Mutex ───────────────────────────────────────────
@@ -119,6 +139,7 @@ impl Inner {
             return Err(HsmError::InvalidParam("payload too large".into()));
         }
         let len = payload.len();
+        // FRAME_OVERHEAD = HDR_LEN(6) + CRC32(4) = 10
         let total = FRAME_OVERHEAD + len;
         let mut frame = vec![0u8; total];
         frame[0] = MAGIC[0];
@@ -127,10 +148,13 @@ impl Inner {
         frame[3] = self.seq;
         frame[4] = (len & 0xFF) as u8;
         frame[5] = ((len >> 8) & 0xFF) as u8;
-        frame[6..6 + len].copy_from_slice(payload);
-        let crc = crc16(&frame[..6 + len]);
-        frame[6 + len]     = (crc & 0xFF) as u8;
-        frame[6 + len + 1] = ((crc >> 8) & 0xFF) as u8;
+        frame[HDR_LEN..HDR_LEN + len].copy_from_slice(payload);
+        // CRC-32/MPEG-2 over header + payload (TSR-TIG-01)
+        let crc = crc32_mpeg2(&frame[..HDR_LEN + len]);
+        frame[HDR_LEN + len]     =  (crc        & 0xFF) as u8;
+        frame[HDR_LEN + len + 1] = ((crc >>  8) & 0xFF) as u8;
+        frame[HDR_LEN + len + 2] = ((crc >> 16) & 0xFF) as u8;
+        frame[HDR_LEN + len + 3] = ((crc >> 24) & 0xFF) as u8;
         Ok(frame)
     }
 
@@ -143,8 +167,8 @@ impl Inner {
         port.write_all(&frame)
             .map_err(|e| HsmError::UsbError(e.to_string()))?;
 
-        // Read response header
-        let mut hdr = [0u8; FRAME_OVERHEAD];
+        // Read fixed response header: [MAGIC:2][RSP:1][SEQ:1][LEN:2] = 6 bytes.
+        let mut hdr = [0u8; HDR_LEN];
         read_exact(port, &mut hdr)?;
 
         if hdr[0] != MAGIC[0] || hdr[1] != MAGIC[1] {
@@ -155,19 +179,23 @@ impl Inner {
             return Err(HsmError::UsbError("response payload too large".into()));
         }
 
-        // Read payload + CRC
-        let mut rest = vec![0u8; rsp_len + 2];
+        // Read payload + CRC-32 (4 bytes) separately so the header buffer
+        // contains exactly HDR_LEN bytes for CRC computation.
+        let mut rest = vec![0u8; rsp_len + 4];
         read_exact(port, &mut rest)?;
 
-        // Verify CRC over header + payload
-        let mut full = hdr.to_vec();
-        full.extend_from_slice(&rest[..rsp_len]);
-        let expected = crc16(&full);
-        let received = u16::from_le_bytes([rest[rsp_len], rest[rsp_len + 1]]);
+        // Verify CRC-32/MPEG-2 over [header || payload] (TSR-TIG-01).
+        let mut to_check = hdr.to_vec();
+        to_check.extend_from_slice(&rest[..rsp_len]);
+        let expected = crc32_mpeg2(&to_check);
+        let received = u32::from_le_bytes([
+            rest[rsp_len],
+            rest[rsp_len + 1],
+            rest[rsp_len + 2],
+            rest[rsp_len + 3],
+        ]);
         if expected != received {
-            return Err(HsmError::UsbError(format!(
-                "CRC mismatch: expected {:#06x} got {:#06x}", expected, received
-            )));
+            return Err(HsmError::CrcMismatch);
         }
 
         // Check sequence echo
@@ -189,7 +217,7 @@ impl Inner {
             Rsp::ErrBadParam  => Err(HsmError::InvalidParam("bad parameter".into())),
             Rsp::ErrCrypto    => Err(HsmError::CryptoFail("firmware crypto error".into())),
             Rsp::ErrBadFrame  => Err(HsmError::UsbError("firmware rejected frame".into())),
-            Rsp::ErrRateLimit => Err(HsmError::UsbError("firmware rate limited".into())),
+            Rsp::ErrRateLimit => Err(HsmError::RateLimitExceeded),
             Rsp::ErrUnknownCmd => Err(HsmError::Unsupported),
             _ => Ok((rsp, rsp_payload)),
         }

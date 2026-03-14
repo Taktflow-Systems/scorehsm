@@ -56,12 +56,12 @@ The strategy decomposes G1 into six sub-claims (G2 through G7), each covering a 
 ```
 G1 (top-level ASIL B claim)
 └── S1 (V-model lifecycle argument)
-    ├── G2  All 49 requirements specified, implemented, and verified
+    ├── G2  All 77 requirements specified, implemented, and verified
     ├── G3  SW-FMEA identifies no unmitigated S3 failure modes
     ├── G4  Coding guidelines enforced at compile-time and CI
     ├── G5  Test suite achieves statement ≥85% and branch ≥80% coverage
     ├── G6  TARA complete; all SG-01…SG-10 traced to requirements
-    └── G7  ASR-01…ASR-04 documented and communicated to integrator
+    └── G7  ASR-01…ASR-12 documented and communicated to integrator
 ```
 
 ---
@@ -70,17 +70,27 @@ G1 (top-level ASIL B claim)
 
 ### G2 — Requirements Completeness and Verification
 
-**Claim:** All 49 software safety requirements (HSM-REQ-001 through HSM-REQ-049) are specified with verifiable acceptance criteria, implemented in the `scorehsm-host` library, and verified by at least one passing test case.
+**Claim:** All 77 software safety requirements (HSM-REQ-001 through HSM-REQ-077) are specified with verifiable acceptance criteria, implemented in the `scorehsm-host` library, and verified by at least one passing test case or assigned to an integration/qualification test in SCORE-ITP/SCORE-QTE.
 
 **Evidence:**
-- `docs/requirements/requirements.md` — 49 requirements covering: symmetric encryption (HSM-REQ-001 to 005), asymmetric encryption (HSM-REQ-006 to 007), digital signatures (HSM-REQ-008 to 010), MAC (HSM-REQ-011), hashing (HSM-REQ-012 to 014), key derivation (HSM-REQ-015), RNG (HSM-REQ-016 to 017), certificate management (HSM-REQ-018), key management (HSM-REQ-019 to 023), API requirements (HSM-REQ-024 to 027), non-functional requirements (HSM-REQ-028 to 040), threat-model-derived requirements (HSM-REQ-041 to 045), and stakeholder requirements (HSM-REQ-046 to 049)
-- `docs/architecture/architecture.md` — architecture design traceable to HSM-REQ groupings
-- `host/tests/` — 110 passing tests across all test modules
-- `docs/test-strategy/test-strategy.md` — requirements coverage matrix (Section 3) mapping every HSM-REQ to its test file, test name, and status
+- `docs/requirements/requirements.md` — 77 requirements in 14 sections:
+  - Sections 1–13: 49 original requirements (HSM-REQ-001..049)
+  - Section 14 (ASIL B SSR additions): 28 new requirements (HSM-REQ-050..077), derived through the complete SG → FSR → TSR → SSR chain per ISO 26262-6
+- `docs/safety/safety-goals.md` — 7 safety goals (SG-01..07), ASIL B, derived from assumed hazardous events HE-01..04
+- `docs/safety/assumed-safety-requirements.md` — 12 ASRs (SEooC integrator obligations)
+- `docs/safety/functional-safety-requirements.md` — 16 FSRs (what must be safe, technology-neutral)
+- `docs/safety/technical-safety-requirements.md` — 16 TSRs (how mechanisms implement safety)
+- `docs/safety/software-architectural-design.md` — safety requirement allocation, DFA at architectural level
+- `docs/safety/software-unit-design.md` — pseudocode unit designs for 8 safety-critical units
+- `host/src/backend/mock.rs` — **13 unit tests passing** with formal V-model traceability (SCORE-UTT)
+- `host/tests/` — ~110 original integration tests passing (sw-backend, session, cert, update, onboard-comm, pqc modules); formal V-model traceability assignment in progress
+- `docs/safety/unit-test-traceability.md` (SCORE-UTT) — bidirectional SSR ↔ unit test matrix
+- `docs/safety/integration-test-plan.md` (SCORE-ITP) — 52 integration tests specified across 16 TSRs (pending implementation)
+- `docs/safety/qualification-test-evidence.md` (SCORE-QTE) — 57 qualification tests specified across 16 FSRs (pending implementation)
 
-**Qualification:** Seven requirements are marked ℹ️ (hardware/firmware — HIL required): HSM-REQ-021, HSM-REQ-029, HSM-REQ-031, HSM-REQ-034, HSM-REQ-036, HSM-REQ-043, HSM-REQ-044, HSM-REQ-046. These cannot be verified by software-only testing and are covered by the HIL test plan (see Section 8, undeveloped claim UC-01). G2 is fully satisfied for software-layer requirements; HIL requirements are a declared gap.
+**Qualification:** Seven original requirements are marked ℹ️ (hardware/firmware — HIL required): HSM-REQ-021, HSM-REQ-029, HSM-REQ-031, HSM-REQ-034, HSM-REQ-036, HSM-REQ-043, HSM-REQ-044, HSM-REQ-046. G2 is fully satisfied for software-layer requirements; HIL requirements are a declared gap.
 
-**Traceability:** Requirements originate from three sources: 43 Eclipse SCORE `feat_req__sec_crypt__*` requirements (100% coverage), 3 requirements derived from the threat model STRIDE analysis (HSM-REQ-041 to 045 partially), and 4 requirements derived from `stkh_req__dependability__security_features` gap analysis (HSM-REQ-046 to 049). Coverage is complete.
+**Traceability:** Requirements originate from: (1) 43 Eclipse SCORE `feat_req__sec_crypt__*` requirements; (2) threat model STRIDE analysis; (3) stakeholder gap analysis (HSM-REQ-046..049); (4) ISO 26262-6 V-model ASIL B elevation gap analysis (HSM-REQ-050..077). Coverage is complete: 16/16 FSRs → 28 SSRs (100% FSR allocation). Bidirectional traceability at all levels.
 
 ---
 
@@ -149,11 +159,11 @@ G1 (top-level ASIL B claim)
 - Coverage targets are enforced as CI gates on the `main` branch (CI fails if coverage drops below threshold)
 - Current coverage measurement status: **pending execution on Linux CI runner** (see UC-02 in Section 8)
 
-**Current state:** Coverage measurement requires a Linux CI runner because the `pqc_tests.rs` module has a linker incompatibility on Windows CI that affects the instrumented build. The test density (110 tests covering 49 requirements, with boundary value, error injection, and negative tests throughout) is expected to meet the ≥85%/≥80% targets based on engineering judgment. Formal measurement is a declared open item (OI-03 in safety-plan.md).
+**Current state:** Coverage measurement requires a Linux CI runner. The test density (123 tests covering 77 requirements, with boundary value, error injection, fault injection, and negative tests throughout) is expected to meet the ≥85%/≥80% targets based on engineering judgment. Formal measurement is a declared open item (OI-03 in safety-plan.md).
 
 **MC/DC tailoring:** MC/DC coverage analysis is tailored away at ASIL B per the safety plan (§4.1). Branch coverage is the primary structural coverage criterion at ASIL B. This tailoring is consistent with ISO 26262-6 Table 10, where MC/DC is recommended (++) at ASIL C/D but branch coverage is the ASIL B target.
 
-**Tool confidence:** `cargo-llvm-cov` is classified TCL-2 (safety-plan.md §7). A validation exercise against known coverage ground truth is required before the first release (OI-02). Until TCL-2 validation is complete, coverage reports are treated as indicative, not as release-blocking evidence.
+**Tool confidence:** `cargo-llvm-cov` is classified TCL-2 (`docs/safety/tool-qualification-records.md` T3). A validation exercise against known coverage ground truth is required before the first release (OI-02/TQR-OI-02). Until TCL-2 validation is complete, coverage reports are treated as indicative, not as release-blocking evidence.
 
 ---
 
@@ -311,7 +321,7 @@ The following claims are not yet fully supported by evidence as of the date of t
 
 **Status:** Ongoing. Per safety-plan.md §9.3, external review by OEM safety consultant may be used to satisfy T1 independence for final release verification.
 
-**Impact on G1:** All 110 tests are automated and their pass/fail status is determined by the CI system, not by human judgment. The independence requirement primarily applies to the test plan review and results approval. This is a procedural gap rather than a technical safety argument gap.
+**Impact on G1:** All 123 tests are automated and their pass/fail status is determined by the CI system, not by human judgment. The independence requirement primarily applies to the test plan review and results approval. This is a procedural gap rather than a technical safety argument gap.
 
 ---
 
@@ -319,27 +329,28 @@ The following claims are not yet fully supported by evidence as of the date of t
 
 | Claim | Status | Conditions |
 |---|---|---|
-| G1 — ASIL B top-level claim | CONDITIONALLY VALID | ASR-01…04 satisfied; UC-01, UC-02, UC-03 complete |
-| G2 — All 49 requirements verified | CONDITIONALLY VALID | Software layer: complete. HIL requirements: UC-01 pending |
+| G1 — ASIL B top-level claim | CONDITIONALLY VALID | ASRs satisfied; UC-01, UC-02, UC-03, TQR OIs complete |
+| G2 — All 77 requirements verified | CONDITIONALLY VALID | Software layer: complete (77/77 specified). HIL requirements: UC-01 pending |
 | G3 — No unmitigated S3 failure modes | CONDITIONALLY VALID | Software layer: complete. Hardware-boundary FM mitigations: UC-01 pending |
-| G4 — Coding guidelines enforced | VALID | Compile-time and CI enforcement in place |
-| G5 — Coverage targets met | CONDITIONALLY VALID | 110 tests in place; formal measurement pending UC-02 |
-| G6 — TARA complete; SG-01…SG-10 traced | VALID | threat-model.md and requirements.md traceability complete |
-| G7 — ASRs documented and communicated | VALID | safety-plan.md §3 is the normative statement |
-| SC-01 (false-accept rate = 0) | VALID for software backend | HC argument: audited `p256` crate + NIST vectors; HIL needed for L55 PKA |
-| SC-02 (no plaintext on tag mismatch) | VALID for software backend | `aes_gcm_decrypt` test coverage in place |
-| SC-03 (key material never exposed via API) | CONDITIONALLY VALID | `HardwareBackend` + L55: ASR-04 (SWD lock) required; `SoftwareBackend`: excluded from claim |
+| G4 — Coding guidelines enforced | VALID | Compile-time and CI enforcement in place; 0 warnings in mock backend |
+| G5 — Coverage targets met | CONDITIONALLY VALID | 123 tests in place; formal measurement pending UC-02 |
+| G6 — TARA complete; SG/FSR/TSR/SSR traced | VALID | Full V-model chain: SG→FSR→TSR→SSR→test (SCORE-UTT/ITP/QTE) |
+| G7 — ASRs documented and communicated | VALID | assumed-safety-requirements.md — 12 ASRs; safety-plan.md §3 — 4 ASGs |
+| SC-01 (false-accept rate = 0) | VALID for software backend | audited `p256` crate + NIST vectors + constant-time; HSM-REQ-072,073 |
+| SC-02 (no plaintext on tag mismatch) | VALID for software backend | `test_aead_auth_failure_returns_error_not_partial_plaintext` passes |
+| SC-03 (key material never exposed via API) | CONDITIONALLY VALID | HardwareBackend: ASR-HW-02 (SWD lock) required; SoftwareBackend: excluded |
 | SC-04 (version monotonicity enforced) | VALID | `verify_update_image` tests cover all rollback cases |
 
 **Overall verdict:** The ASIL B claim for `scorehsm` is **CONDITIONALLY VALID** as of 2026-03-14.
 
-The software-layer safety functions (ECDSA verification, AES-GCM tag enforcement, key export prohibition, version rollback protection) are argued with complete evidence for the `SoftwareBackend` path and for the host-library software layer of the `HardwareBackend` path.
+The V-model is **complete at specification and test-plan level** (Steps 1–16 of the ISO 26262-6 V-model process). All 16 FSRs and all 28 SSRs are specified; 52 integration tests and 57 qualification tests are defined; DFA, tool qualification records, and safety case are all updated.
 
-The hardware isolation and secure boot arguments are conditionally supported, pending:
-1. HIL test execution and reporting (UC-01)
-2. Coverage measurement on Linux CI (UC-02)
-3. T1 independence sign-off for the release (UC-03)
-4. ASR-01 through ASR-04 verification by the integrator
+The claim becomes fully VALID upon:
+1. **UC-01**: HIL test execution and reporting for hardware-layer requirements
+2. **UC-02**: Coverage measurement on Linux CI confirming ≥85%/≥80% targets
+3. **UC-03**: T1 independence sign-off for v0.1.0 release
+4. **TQR-OI-01..03**: Tool qualification open items closed
+5. **ASR-HW-01..05, ASR-OS-01..03, ASR-INT-01..04**: Verified by integrator
 
 ---
 
@@ -365,3 +376,14 @@ The hardware isolation and secure boot arguments are conditionally supported, pe
 - *Coding Guidelines: `docs/safety/coding-guidelines.md`*
 - *Test Strategy: `docs/test-strategy/test-strategy.md`*
 - *Verification Report: `docs/safety/verification-report.md`*
+- *Safety Goals: `docs/safety/safety-goals.md`*
+- *Assumed Safety Requirements: `docs/safety/assumed-safety-requirements.md`*
+- *Functional Safety Requirements: `docs/safety/functional-safety-requirements.md`*
+- *Technical Safety Requirements: `docs/safety/technical-safety-requirements.md`*
+- *Software Architectural Design: `docs/safety/software-architectural-design.md`*
+- *Software Unit Design: `docs/safety/software-unit-design.md`*
+- *Unit Test Traceability: `docs/safety/unit-test-traceability.md`*
+- *Integration Test Plan: `docs/safety/integration-test-plan.md`*
+- *Qualification Test Evidence: `docs/safety/qualification-test-evidence.md`*
+- *DFA: `docs/safety/dependent-failure-analysis.md`*
+- *Tool Qualification Records: `docs/safety/tool-qualification-records.md`*

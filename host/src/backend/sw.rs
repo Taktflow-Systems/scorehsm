@@ -371,7 +371,6 @@ impl HsmBackend for SoftwareBackend {
             _ => return Err(HsmError::InvalidKeyHandle),
         };
         use p256::{
-            ecdh::EphemeralSecret,
             elliptic_curve::sec1::FromEncodedPoint,
             EncodedPoint, PublicKey, SecretKey,
         };

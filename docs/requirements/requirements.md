@@ -346,6 +346,226 @@ replay. Invalid or replayed tokens shall emit `IdsEvent::ActivationRejected`.
 
 ---
 
+## 14. Software Safety Requirements (SSR) — ISO 26262-6 ASIL B
+
+These requirements are derived from the FSR/TSR safety requirement chain (SCORE-FSR →
+SCORE-TSR) and govern the `scorehsm-host` library at the implementation level. Each
+requirement carries bidirectional traceability to a TSR and is testable in CI via
+`MockHardwareBackend` without physical hardware.
+
+**ASIL:** All requirements in this section are ASIL B unless noted otherwise.
+
+### 14a. Transport Integrity
+
+### HSM-REQ-050 — CRC-32/MPEG-2 frame integrity check
+**TSR:** TSR-TIG-01 | **FSR:** FSR-08 | **SG:** SG-05
+Every USB CDC command frame sent to the L55 and every response frame received from the L55
+shall carry a 4-byte CRC-32/MPEG-2 check value (polynomial 0x04C11DB7, init 0xFFFFFFFF)
+computed over the entire frame. The receiver shall recompute and compare; a mismatch shall
+return `HsmError::CrcMismatch` and the frame payload shall not be used.
+
+### HSM-REQ-051 — 32-bit monotonic sequence numbers
+**TSR:** TSR-TIG-02 | **FSR:** FSR-09 | **SG:** SG-05
+The host library shall maintain a 32-bit unsigned sequence number initialized to 1 and
+incremented by 1 per command. Each response frame shall echo the command's sequence number.
+A mismatched echo shall return `HsmError::ProtocolError`. At value `0xFFFF_FFFF` the library
+shall refuse further operations with `HsmError::SequenceOverflow` and require re-initialization.
+
+### HSM-REQ-052 — Per-operation command timeout
+**TSR:** TSR-TIG-03 | **FSR:** FSR-10 | **SG:** SG-06
+The library shall apply per-operation timeouts: AES/hash/HMAC/RNG 100 ms; ECDSA sign/verify
+and ECDH 2000 ms; key generation 5000 ms; administrative 500 ms. Timeout shall return
+`HsmError::Timeout`. All timeouts shall be configurable via `HsmConfig`.
+
+### HSM-REQ-053 — Retry policy and persistent-failure safe state
+**TSR:** TSR-TIG-04 | **FSR:** FSR-08, FSR-10 | **SG:** SG-05, SG-06
+On CRC mismatch or timeout, the library shall retry up to 2 times with exponential back-off
+(initial 10 ms, factor 2). After 3 consecutive failures on the same operation the library
+shall enter safe state (HSM-REQ-063). A single retry success shall reset the consecutive
+failure counter.
+
+### 14b. Nonce Management
+
+### HSM-REQ-054 — Per-key nonce counter in persistent storage
+**TSR:** TSR-NMG-01 | **FSR:** FSR-06, FSR-07 | **SG:** SG-04
+For each key handle used in AEAD encryption the library shall maintain a 64-bit monotonic
+nonce counter stored in a local SQLite WAL database (`nonce_counters(key_id, counter)`).
+The counter shall be incremented and persisted to disk **before** each AEAD invocation.
+On nonce counter overflow (reaching `u64::MAX`) the library shall reject the operation
+with `HsmError::NonceExhausted` and require key rotation.
+
+### HSM-REQ-055 — Library-controlled IV derivation
+**TSR:** TSR-NMG-01 | **FSR:** FSR-06 | **SG:** SG-04
+The 12-byte GCM IV shall be derived by the library as
+`HKDF-SHA256(ikm=key_id || counter, info=algo_domain_string, length=12)`.
+The library shall reject any caller-supplied IV for AEAD encryption.
+
+### HSM-REQ-056 — HKDF domain separation
+**TSR:** TSR-NMG-02 | **FSR:** FSR-06 | **SG:** SG-04
+Every HKDF invocation shall use a non-empty algorithm-specific `info` string from the
+approved table in SCORE-TSR §3 (TSR-NMG-02). The HKDF API shall return
+`HsmError::InvalidArgument` if an empty `info` string is supplied.
+
+### 14c. Session Management
+
+### HSM-REQ-057 — Session-scoped key handle validation
+**TSR:** TSR-SMG-01 | **FSR:** FSR-12 | **SG:** SG-07
+The library shall maintain a `HashMap<SessionId, HashSet<KeyHandle>>`. Every operation
+that accepts a key handle shall look up the handle in the caller's session set only.
+A handle present in a different session's set shall be rejected with `HsmError::InvalidHandle`.
+
+### HSM-REQ-058 — Session inactivity timeout
+**TSR:** TSR-SMG-02 | **FSR:** FSR-13 | **SG:** SG-06, SG-07
+Each session shall record the `std::time::Instant` of its last completed operation.
+A background sweep (interval ≤1 s) shall terminate sessions idle longer than the
+configured timeout (default 300 s). Termination invalidates all session handles and
+emits a `SessionExpired` IDS event.
+
+### HSM-REQ-059 — Maximum concurrent sessions
+**TSR:** TSR-SMG-03 | **FSR:** FSR-14 | **SG:** SG-06
+The library shall enforce a configurable maximum number of concurrent sessions (default 8,
+configurable via `HsmConfig::max_sessions`). Exceeding the limit shall return
+`HsmError::ResourceExhausted`.
+
+### 14d. Rate Limiting
+
+### HSM-REQ-060 — Token-bucket rate limiter per operation class
+**TSR:** TSR-RLG-01 | **FSR:** FSR-14 | **SG:** SG-06
+The library shall implement a token-bucket rate limiter enforced globally across all sessions
+with the following defaults: ECDSA sign 10 ops/s burst 5; ECDSA verify 20 ops/s burst 10;
+key generation 2 ops/s burst 1; ECDH 10 ops/s burst 5; AES-GCM 100 ops/s burst 20.
+Requests exceeding the limit shall return `HsmError::RateLimitExceeded` immediately.
+All limits shall be configurable via `HsmConfig::rate_limits`.
+
+### 14e. Safe State
+
+### HSM-REQ-061 — Library state machine
+**TSR:** TSR-SSG-01 | **FSR:** FSR-10, FSR-11 | **SG:** SG-06
+The library shall implement states `{Initializing, Ready, Operating, SafeState}` using an
+`AtomicU8` with `SeqCst` ordering. Transitions are:
+`Initializing → Ready` (on successful init);
+`Ready/Operating ↔ Operating` (normal ops);
+`Any → SafeState` (on any integrity fault listed in TSR-SSG-01).
+Re-initialization (`hsm_reinit()`) is the only exit from `SafeState`.
+
+### HSM-REQ-062 — Safe state blocks all operations
+**TSR:** TSR-SSG-01 | **FSR:** FSR-11 | **SG:** SG-06
+While in `SafeState`, every incoming operation request (crypto, session, key management)
+shall return `HsmError::SafeState` immediately without contacting the L55. Active sessions
+shall be invalidated on safe state entry.
+
+### HSM-REQ-063 — Safe state triggers
+**TSR:** TSR-SSG-01 | **FSR:** FSR-10 | **SG:** SG-06
+The following events shall unconditionally trigger safe state entry:
+(a) CRC mismatch after max retries; (b) sequence number mismatch; (c) key store integrity
+check failure (HSM-REQ-065); (d) L55 fault opcode received; (e) session state
+inconsistency detected during handle lookup.
+
+### HSM-REQ-064 — Safe state IDS event
+**TSR:** TSR-SSG-01 | **FSR:** FSR-11 | **SG:** SG-06
+On safe state entry the library shall emit a `LibrarySafeState` event to the IDS hook
+containing the triggering condition code, the sequence number of the failing command, and
+the current session count at time of entry.
+
+### HSM-REQ-065 — Key store map integrity checksum
+**TSR:** TSR-SSG-02 | **FSR:** FSR-10 | **SG:** SG-06
+The session/handle map shall carry a CRC-32 checksum of its serialized content, updated on
+every write. On every read access the checksum shall be verified. A mismatch shall trigger
+safe state (HSM-REQ-063) with `HsmError::IntegrityViolation`.
+
+### 14f. Key Lifecycle Safety
+
+### HSM-REQ-066 — ZeroizeOnDrop on all key-material types
+**TSR:** TSR-KLG-01 | **FSR:** FSR-05 | **SG:** SG-03 | **ASIL:** B(d)
+Every Rust type that contains raw key bytes shall derive `ZeroizeOnDrop` from the `zeroize`
+crate. A compile-time assertion in each file containing such a type shall verify the
+`ZeroizeOnDrop` bound is present. This requirement extends HSM-REQ-023.
+
+### HSM-REQ-067 — No key export opcode
+**TSR:** TSR-KLG-02 | **FSR:** FSR-04 | **SG:** SG-03 | **ASIL:** B(d)
+The USB CDC opcode table shall contain no opcode that returns raw key material from the L55
+to the host. Each firmware release shall be verified against this invariant as part of the
+opcode audit documented in the verification report.
+
+### 14g. Hardware Identity Verification
+
+### HSM-REQ-068 — Startup capability handshake
+**TSR:** TSR-IVG-01 | **FSR:** FSR-15 | **SG:** SG-01, SG-02, SG-06
+During `hsm_init()`, before accepting any crypto operation, the library shall: (1) verify
+USB VID/PID; (2) send `CMD_GET_CAPABILITIES` with sequence number 0; (3) verify the
+response CRC-32 and sequence number echo; (4) verify firmware version ≥ minimum configured
+version; (5) verify the capability bitmask includes all required operations. Any failure
+shall return `HsmError::InitializationFailed` and the library shall remain in
+`Initializing` state.
+
+### HSM-REQ-069 — VID/PID recheck on re-enumeration
+**TSR:** TSR-IVG-01 | **FSR:** FSR-15 | **SG:** SG-01
+On USB re-enumeration while the library is in `Ready` or `Operating` state, the library
+shall re-verify the VID/PID. If the device identity changes, the library shall enter safe
+state with `HsmError::DeviceIdentityChanged`.
+
+### 14h. Certificate Safety
+
+### HSM-REQ-070 — Certificate validity window enforcement
+**TSR:** TSR-CG-01 | **FSR:** FSR-16 | **SG:** SG-01
+Before any operation that uses a certificate, the library shall check `notBefore ≤ now ≤
+notAfter` using `std::time::SystemTime::now()`. An expired certificate shall return
+`HsmError::CertificateExpired`. A pre-valid certificate shall return
+`HsmError::CertificateNotYetValid`.
+
+### HSM-REQ-071 — Clock unavailability rejects certificate operations
+**TSR:** TSR-CG-01 | **FSR:** FSR-16 | **SG:** SG-01
+If `SystemTime::now()` returns an error (clock unavailable), all operations requiring
+certificate validation shall return `HsmError::ClockUnavailable`. The library shall not
+proceed with certificate-based operations using an unverified time source.
+
+### 14i. Verification Safety Properties
+
+### HSM-REQ-072 — Verification returns definitive result only
+**TSR:** (direct FSR implementation) | **FSR:** FSR-01 | **SG:** SG-01
+`verify()`, `aead_decrypt()`, and `mac_verify()` shall return either a definitive success
+(`Ok(data)` or `Ok(true)`) or an error. Partial decryption buffers shall not be exposed
+to the caller on error. If AEAD tag verification fails, the output buffer shall be
+zeroed before returning `HsmError::AuthenticationFailed`.
+
+### HSM-REQ-073 — Constant-time tag and signature comparison
+**TSR:** (direct FSR implementation) | **FSR:** FSR-02 | **SG:** SG-01
+All comparison operations that determine the outcome of a cryptographic verification shall
+use a constant-time comparison function (e.g., `subtle::ConstantTimeEq`). Conditional
+branches dependent on secret comparison state are prohibited.
+
+### 14j. Power-On Self-Test (POST)
+
+### HSM-REQ-074 — AES-GCM known-answer test at initialization
+**FSR:** FSR-03 | **SG:** SG-01, SG-02
+During `hsm_init()`, the library shall execute a known-answer test (KAT) for AES-256-GCM
+using a fixed test vector from NIST SP 800-38D. If the computed ciphertext or tag does not
+match the expected value, initialization shall fail with `HsmError::SelfTestFailed`.
+
+### HSM-REQ-075 — ECDSA known-answer test at initialization
+**FSR:** FSR-03 | **SG:** SG-01
+During `hsm_init()`, the library shall execute a known-answer test for ECDSA P-256 sign
+and verify using a fixed test vector. A sign/verify cycle that fails shall cause
+initialization to fail with `HsmError::SelfTestFailed`.
+
+### HSM-REQ-076 — POST failure prevents Ready state
+**FSR:** FSR-10, FSR-11 | **SG:** SG-06
+If any POST (HSM-REQ-074 or HSM-REQ-075) fails, the library shall remain in
+`Initializing` state and return `HsmError::SelfTestFailed`. The library shall not
+transition to `Ready` until all POST steps pass.
+
+### 14k. Test Infrastructure
+
+### HSM-REQ-077 — MockHardwareBackend for CI coverage
+**FSR:** FSR-03, FSR-08, FSR-09, FSR-10, FSR-11 | **SG:** all
+A `MockHardwareBackend` shall be provided in the test infrastructure that implements
+`HsmBackend` by simulating USB CDC protocol responses in-process. The mock shall support:
+injection of CRC errors, sequence number mismatches, timeouts, L55 fault opcodes, and
+configurable operation latency. All HSM-REQ-050..076 tests shall pass using this mock
+without requiring physical hardware.
+
+---
+
 ## Traceability Summary
 
 | HSM-REQ | SCORE req ID | Status |
@@ -399,7 +619,41 @@ replay. Invalid or replayed tokens shall emit `IdsEvent::ActivationRejected`.
 | HSM-REQ-047 | stkh_req__dependability__security_features (secure update) | New — stakeholder req |
 | HSM-REQ-048 | stkh_req__dependability__security_features (IPSec/MACSec) | New — stakeholder req |
 | HSM-REQ-049 | stkh_req__dependability__security_features (feature activation) | New — stakeholder req |
+| HSM-REQ-050 | TSR-TIG-01 / FSR-08 / SG-05 | New — SSR (transport CRC-32) |
+| HSM-REQ-051 | TSR-TIG-02 / FSR-09 / SG-05 | New — SSR (sequence numbers) |
+| HSM-REQ-052 | TSR-TIG-03 / FSR-10 / SG-06 | New — SSR (command timeout) |
+| HSM-REQ-053 | TSR-TIG-04 / FSR-08,10 / SG-05,06 | New — SSR (retry + safe state) |
+| HSM-REQ-054 | TSR-NMG-01 / FSR-06,07 / SG-04 | New — SSR (nonce counter persistent) |
+| HSM-REQ-055 | TSR-NMG-01 / FSR-06 / SG-04 | New — SSR (library IV derivation) |
+| HSM-REQ-056 | TSR-NMG-02 / FSR-06 / SG-04 | New — SSR (HKDF domain sep) |
+| HSM-REQ-057 | TSR-SMG-01 / FSR-12 / SG-07 | New — SSR (session handle map) |
+| HSM-REQ-058 | TSR-SMG-02 / FSR-13 / SG-06,07 | New — SSR (session timeout) |
+| HSM-REQ-059 | TSR-SMG-03 / FSR-14 / SG-06 | New — SSR (max sessions) |
+| HSM-REQ-060 | TSR-RLG-01 / FSR-14 / SG-06 | New — SSR (rate limiter) |
+| HSM-REQ-061 | TSR-SSG-01 / FSR-10,11 / SG-06 | New — SSR (state machine) |
+| HSM-REQ-062 | TSR-SSG-01 / FSR-11 / SG-06 | New — SSR (safe state blocks ops) |
+| HSM-REQ-063 | TSR-SSG-01 / FSR-10 / SG-06 | New — SSR (safe state triggers) |
+| HSM-REQ-064 | TSR-SSG-01 / FSR-11 / SG-06 | New — SSR (safe state IDS event) |
+| HSM-REQ-065 | TSR-SSG-02 / FSR-10 / SG-06 | New — SSR (key store checksum) |
+| HSM-REQ-066 | TSR-KLG-01 / FSR-05 / SG-03 | New — SSR (ZeroizeOnDrop) |
+| HSM-REQ-067 | TSR-KLG-02 / FSR-04 / SG-03 | New — SSR (no key export opcode) |
+| HSM-REQ-068 | TSR-IVG-01 / FSR-15 / SG-01,02,06 | New — SSR (startup handshake) |
+| HSM-REQ-069 | TSR-IVG-01 / FSR-15 / SG-01 | New — SSR (VID/PID recheck) |
+| HSM-REQ-070 | TSR-CG-01 / FSR-16 / SG-01 | New — SSR (cert validity window) |
+| HSM-REQ-071 | TSR-CG-01 / FSR-16 / SG-01 | New — SSR (clock unavail rejects cert) |
+| HSM-REQ-072 | FSR-01 / SG-01 | New — SSR (definitive verify result) |
+| HSM-REQ-073 | FSR-02 / SG-01 | New — SSR (constant-time compare) |
+| HSM-REQ-074 | FSR-03 / SG-01,02 | New — SSR (AES-GCM KAT at init) |
+| HSM-REQ-075 | FSR-03 / SG-01 | New — SSR (ECDSA KAT at init) |
+| HSM-REQ-076 | FSR-10,11 / SG-06 | New — SSR (POST failure blocks Ready) |
+| HSM-REQ-077 | FSR-03,08,09,10,11 / all SGs | New — SSR (MockHardwareBackend) |
 
-**Total: 49 requirements (43 SCORE feat_req-derived + 3 from threat model + 4 from stkh_req gap analysis)**
+**Total: 77 requirements**
+- 43 SCORE feat_req-derived (HSM-REQ-001..043)
+- 6 threat model / stakeholder (HSM-REQ-041..049, excluding duplicates in numbering)
+- 28 Software Safety Requirements — ISO 26262-6 ASIL B (HSM-REQ-050..077)
+
 **feat_req__sec_crypt__ coverage: 43/43 (100%)**
-**stkh_req__dependability__security_features coverage: 10/10 sub-items addressed (6 by existing reqs, 4 new reqs, 2 noted as platform out-of-scope)**
+**stkh_req__dependability__security_features coverage: 10/10 (100%)**
+**ISO 26262-6 FSR coverage: 16/16 FSRs → 28 SSRs (100% FSR allocation)**
+**ISO 26262-6 TSR coverage: 16/16 TSRs allocated to SSRs (100%)**

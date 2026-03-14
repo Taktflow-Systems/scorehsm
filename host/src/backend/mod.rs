@@ -8,6 +8,9 @@ pub mod sw;
 #[cfg(feature = "hw-backend")]
 pub mod hw;
 
+#[cfg(any(test, feature = "mock"))]
+pub mod mock;
+
 /// Core backend trait — implemented by both software fallback and hardware backend.
 ///
 /// All operations use key handles. Key material never crosses this interface.
