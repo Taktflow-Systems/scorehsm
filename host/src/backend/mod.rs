@@ -21,8 +21,25 @@ pub trait HsmBackend: Send + Sync {
     /// Generate a new key of the given type. Returns an opaque handle.
     fn key_generate(&mut self, key_type: KeyType) -> HsmResult<KeyHandle>;
 
-    /// Import a wrapped (encrypted) key. Returns an opaque handle.
-    fn key_import(&mut self, key_type: KeyType, wrapped: &[u8]) -> HsmResult<KeyHandle>;
+    /// Import key material and return an opaque handle.
+    ///
+    /// # Backend-specific behaviour (HSM-REQ-022)
+    ///
+    /// **Software backend:** accepts raw (unwrapped) key bytes.  This is
+    /// permitted because the software backend provides no hardware isolation —
+    /// KEK-wrapping would add no security benefit.  Use the software backend
+    /// for testing and development only; never for production provisioning.
+    ///
+    /// **Hardware backend (STM32L552):** material MUST be wrapped under the
+    /// device Key Encryption Key (KEK) provisioned at manufacturing time.  The
+    /// KEK never leaves the STM32L552 Secure world.  The firmware rejects any
+    /// attempt to import raw, unwrapped material with `ErrBadParam`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `HsmError::InvalidParam` if `material` is the wrong length or
+    /// contains an invalid key value (e.g. zero scalar for EccP256).
+    fn key_import(&mut self, key_type: KeyType, material: &[u8]) -> HsmResult<KeyHandle>;
 
     /// Delete a key slot and zeroize key material.
     fn key_delete(&mut self, handle: KeyHandle) -> HsmResult<()>;

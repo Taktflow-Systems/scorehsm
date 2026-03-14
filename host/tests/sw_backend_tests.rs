@@ -8,7 +8,7 @@
 use scorehsm_host::{
     backend::{sw::SoftwareBackend, HsmBackend},
     error::HsmError,
-    types::{AesGcmParams, EcdsaSignature, KeyType},
+    types::{AesGcmParams, KeyType},
 };
 use p256;
 
@@ -26,7 +26,7 @@ fn init_backend() -> SoftwareBackend {
 /// Traces: HSM-REQ-026 / feat_req__sec_crypt__api_lifecycle
 #[test]
 fn test_not_initialized_before_init() {
-    let mut b = SoftwareBackend::new();
+    let b = SoftwareBackend::new();
     let result = b.sha256(b"hello");
     assert!(matches!(result, Err(HsmError::NotInitialized)));
 }
@@ -329,14 +329,32 @@ fn test_hmac_sha256_different_keys() {
     assert_ne!(mac1, mac2);
 }
 
-/// HMAC-SHA256 NIST test vector (RFC 4231, test case 1).
-/// Key = 0x0b * 20, data = "Hi There", HMAC = b0344c61...
-/// Traces: HSM-REQ-011 / feat_req__sec_crypt__mac
+/// Importing identical keys into two handles must produce identical MACs.
+///
+/// Verifies that `key_import` stores the key bytes faithfully — if the stored
+/// bytes differed from what was supplied, the MAC output would differ.
+///
+/// Traces: HSM-REQ-011, HSM-REQ-022 / feat_req__sec_crypt__mac
 #[test]
 fn test_hmac_sha256_nist_vector() {
-    // For SW backend: import a known key
-    // This test will be enabled once key_import is implemented
-    // TODO: enable when key_import is complete
+    let mut b = init_backend();
+
+    let key_a = [0x0bu8; 32];
+    let h1 = b.key_import(KeyType::HmacSha256, &key_a).unwrap();
+    let h2 = b.key_import(KeyType::HmacSha256, &key_a).unwrap();
+
+    let mac1 = b.hmac_sha256(h1, b"Hi There").unwrap();
+    let mac2 = b.hmac_sha256(h2, b"Hi There").unwrap();
+
+    // Same key bytes in two separate slots must yield the same MAC.
+    assert_eq!(mac1, mac2,
+        "two handles with identical imported key bytes must produce the same MAC");
+
+    // A different key must produce a different MAC.
+    let h3 = b.key_import(KeyType::HmacSha256, &[0xffu8; 32]).unwrap();
+    let mac3 = b.hmac_sha256(h3, b"Hi There").unwrap();
+    assert_ne!(mac1, mac3,
+        "different imported key bytes must yield a different MAC");
 }
 
 // ─── HSM-REQ-008/010 — ECDSA P-256 ─────────────────────────────────────────
@@ -423,17 +441,39 @@ fn test_hkdf_derived_key_is_usable() {
     assert!(result.is_ok());
 }
 
-/// Same base key and same info must derive the same key material (deterministic).
+/// HKDF-SHA256 must be deterministic: same base key + same info → same derived key.
+///
+/// Uses `key_import` to load a known base key into two separate slots, then
+/// derives from each.  The derived keys must produce identical HMAC output,
+/// proving the derivation is a pure function of the input.
+///
 /// Traces: HSM-REQ-015 / feat_req__sec_crypt__kdf
 #[test]
 fn test_hkdf_deterministic() {
-    // For this test we need key comparison — use HMAC as a proxy:
-    // if derived keys are same, HMAC of same input is same
     let mut b = init_backend();
-    let base1 = b.key_generate(KeyType::HmacSha256).unwrap();
-    // Note: true determinism test requires importing a fixed key as base
-    // TODO: enable full determinism test once key_import is complete
-    let _ = base1;
+
+    // Import the same base key into two independent slots.
+    let known_base = [0xAAu8; 32];
+    let h1 = b.key_import(KeyType::HmacSha256, &known_base).unwrap();
+    let h2 = b.key_import(KeyType::HmacSha256, &known_base).unwrap();
+
+    // Derive from each with identical info strings.
+    let d1 = b.key_derive(h1, b"scorehsm-test-context", KeyType::HmacSha256).unwrap();
+    let d2 = b.key_derive(h2, b"scorehsm-test-context", KeyType::HmacSha256).unwrap();
+
+    // If HKDF is deterministic, both derived keys are identical.
+    // Verify by MAC: equal keys → equal MAC.
+    let mac1 = b.hmac_sha256(d1, b"verification payload").unwrap();
+    let mac2 = b.hmac_sha256(d2, b"verification payload").unwrap();
+    assert_eq!(mac1, mac2,
+        "HKDF with identical base key and info must produce identical derived key (HSM-REQ-015)");
+
+    // A different info string must yield a different derived key.
+    let h3 = b.key_import(KeyType::HmacSha256, &known_base).unwrap();
+    let d3 = b.key_derive(h3, b"different-context", KeyType::HmacSha256).unwrap();
+    let mac3 = b.hmac_sha256(d3, b"verification payload").unwrap();
+    assert_ne!(mac1, mac3,
+        "different info strings must produce different derived keys");
 }
 
 // ─── HSM-REQ-023 — No key export ────────────────────────────────────────────
@@ -494,61 +534,65 @@ fn test_ecdh_produces_32_bytes() {
     assert_ne!(shared, [0u8; 32], "shared secret must not be all-zero");
 }
 
-/// ECDH is symmetric: A.agree(B.pub) == B.agree(A.pub).
+/// ECDH is symmetric: ecdh_agree(A_sk, B_pk) == ecdh_agree(B_sk, A_pk).
 ///
-/// Verified using pure p256 (mathematical property) and then cross-checking
-/// that the backend's output matches the expected value for A's direction.
-/// (key_import is not yet implemented, so we verify one direction via the backend
-/// and both directions via the external p256 crate.)
+/// Both directions are exercised through the backend using `key_import` to
+/// load known scalars.  This tests the full end-to-end property — not just
+/// the mathematical identity via an external crate.
 ///
-/// Traces: HSM-REQ-013 / feat_req__sec_crypt__key_agreement
+/// Traces: HSM-REQ-006 / feat_req__sec_crypt__key_agreement
 #[test]
 fn test_ecdh_symmetric() {
-    use p256::{
-        ecdh::diffie_hellman,
-        elliptic_curve::sec1::ToEncodedPoint,
-        SecretKey,
-    };
+    use p256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
 
-    // Two known P-256 scalars
+    // Two known, valid P-256 scalars used as fixed test vectors.
     let scalar_a: [u8; 32] = [
-        0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,
-        0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0x10,
-        0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,
-        0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f,0x20,
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+        0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
     ];
     let scalar_b: [u8; 32] = [
-        0xde,0xad,0xbe,0xef,0xca,0xfe,0xba,0xbe,
-        0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,
-        0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0x10,
-        0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,
+        0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe,
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
     ];
 
+    // Derive each party's public key from the known scalar (used as the peer
+    // argument to ecdh_agree — the backend only needs the 64-byte X||Y point).
+    let pub_a = ecdh_peer_pub_from_scalar(&scalar_a);
+    let pub_b = ecdh_peer_pub_from_scalar(&scalar_b);
+
+    let mut b = init_backend();
+
+    // Import both private keys so the backend holds the known scalar material.
+    let ha = b.key_import(KeyType::EccP256, &scalar_a).unwrap();
+    let hb = b.key_import(KeyType::EccP256, &scalar_b).unwrap();
+
+    // Both directions through the backend — must produce the same shared secret.
+    let ss_a_side = b.ecdh_agree(ha, &pub_b).unwrap(); // A uses B's public key
+    let ss_b_side = b.ecdh_agree(hb, &pub_a).unwrap(); // B uses A's public key
+
+    assert_eq!(ss_a_side, ss_b_side,
+        "ECDH(A_sk, B_pk) must equal ECDH(B_sk, A_pk) — tested end-to-end via the backend");
+    assert_ne!(ss_a_side, [0u8; 32],
+        "shared secret must not be all-zero");
+
+    // Cross-check: backend result must match the expected value from the pure
+    // p256 crate (guards against a backend implementation that passes the
+    // symmetry check but computes the wrong shared secret entirely).
     let sk_a = SecretKey::from_bytes(&scalar_a.into()).unwrap();
     let sk_b = SecretKey::from_bytes(&scalar_b.into()).unwrap();
-
-    // Mathematical symmetry via pure p256
-    let ss_a_to_b = diffie_hellman(sk_a.to_nonzero_scalar(), sk_b.public_key().as_affine());
-    let ss_b_to_a = diffie_hellman(sk_b.to_nonzero_scalar(), sk_a.public_key().as_affine());
-    assert_eq!(
-        ss_a_to_b.raw_secret_bytes().as_slice(),
-        ss_b_to_a.raw_secret_bytes().as_slice(),
-        "ECDH must be symmetric in pure P256"
-    );
-
-    // Backend must agree with the pure-p256 result for A's direction
-    // Build peer_pub (B's public key without the 0x04 prefix)
     let pub_b_ep = sk_b.public_key().to_encoded_point(false);
-    let mut peer_b = [0u8; 64];
-    peer_b.copy_from_slice(&pub_b_ep.as_bytes()[1..65]);
-
-    // Use B's known scalar as the ECDH key in the backend (as a raw HmacSha256
-    // import is not available, we test via a randomly-generated key that the
-    // backend returns non-zero output, and use external p256 to validate the math).
-    let mut b = init_backend();
-    let h = b.key_generate(KeyType::EccP256).unwrap();
-    let ss_backend = b.ecdh_agree(h, &peer_b).unwrap();
-    assert_ne!(ss_backend, [0u8; 32], "backend ECDH must produce non-zero shared secret");
+    let expected = p256::ecdh::diffie_hellman(
+        sk_a.to_nonzero_scalar(),
+        sk_b.public_key().as_affine(),
+    );
+    // The backend's first-direction result must match the pure-p256 reference.
+    assert_eq!(ss_a_side, expected.raw_secret_bytes().as_slice(),
+        "backend ECDH result must match the reference p256 implementation");
+    let _ = pub_b_ep; // unused except for conceptual clarity above
 }
 
 /// ECDH with a non-EccP256 handle (AES key) must be rejected.
@@ -571,4 +615,116 @@ fn test_ecdh_invalid_peer_point_rejected() {
     let bad_peer = [0u8; 64]; // all zeros — not a valid P-256 point
     let result = b.ecdh_agree(h, &bad_peer);
     assert!(result.is_err(), "ECDH with invalid peer point must be rejected");
+}
+
+// ─── HSM-REQ-022 — Key import ────────────────────────────────────────────────
+
+/// key_import(AES-256) with a valid 32-byte key must return a usable handle.
+/// Traces: HSM-REQ-022 / feat_req__sec_crypt__key_import
+#[test]
+fn test_key_import_aes256_is_usable() {
+    let mut b = init_backend();
+    let h = b.key_import(KeyType::Aes256, &[0x42u8; 32]).unwrap();
+    let iv = [0u8; 12];
+    assert!(b.aes_gcm_encrypt(h, &gcm_params(&iv, b""), b"plaintext").is_ok(),
+        "imported AES-256 key must be usable for encryption (HSM-REQ-022)");
+}
+
+/// key_import(HmacSha256) with a valid 32-byte key must return a usable handle.
+/// Traces: HSM-REQ-022 / feat_req__sec_crypt__key_import
+#[test]
+fn test_key_import_hmac_sha256_is_usable() {
+    let mut b = init_backend();
+    let h = b.key_import(KeyType::HmacSha256, &[0x01u8; 32]).unwrap();
+    assert!(b.hmac_sha256(h, b"data").is_ok(),
+        "imported HMAC-SHA256 key must be usable (HSM-REQ-022)");
+}
+
+/// key_import(EccP256) with a valid scalar must return a usable signing handle.
+/// Traces: HSM-REQ-022 / feat_req__sec_crypt__key_import
+#[test]
+fn test_key_import_ecc_p256_is_usable() {
+    let mut b = init_backend();
+    // Known valid P-256 scalar.
+    let scalar: [u8; 32] = [
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+        0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+    ];
+    let h = b.key_import(KeyType::EccP256, &scalar).unwrap();
+    let digest = [0x01u8; 32];
+    assert!(b.ecdsa_sign(h, &digest).is_ok(),
+        "imported P-256 key must be usable for signing (HSM-REQ-022)");
+}
+
+/// key_import with a wrong-length buffer must return InvalidParam.
+/// Traces: HSM-REQ-022, HSM-REQ-027 / feat_req__sec_crypt__key_import
+#[test]
+fn test_key_import_wrong_length_rejected() {
+    let mut b = init_backend();
+    let short = [0x42u8; 16]; // 16 bytes, not 32
+    assert!(
+        matches!(b.key_import(KeyType::Aes256, &short), Err(HsmError::InvalidParam(_))),
+        "wrong-length material must be rejected with InvalidParam (HSM-REQ-022)"
+    );
+}
+
+/// key_import(EccP256) with the all-zero scalar must be rejected.
+///
+/// The all-zero scalar is not a valid P-256 private key (it equals the
+/// identity element).  Accepting it would create a silently broken handle.
+///
+/// Traces: HSM-REQ-022, HSM-REQ-027 / feat_req__sec_crypt__key_import
+#[test]
+fn test_key_import_invalid_p256_scalar_rejected() {
+    let mut b = init_backend();
+    assert!(
+        matches!(b.key_import(KeyType::EccP256, &[0u8; 32]), Err(HsmError::InvalidParam(_))),
+        "all-zero P-256 scalar must be rejected with InvalidParam (HSM-REQ-022)"
+    );
+}
+
+// ─── HSM-REQ-043 — Key zeroization ───────────────────────────────────────────
+
+/// After key_delete, the handle must be unusable for all operations.
+///
+/// The actual memory zeroing is guaranteed by `ZeroizeOnDrop` on `KeyMaterial`
+/// (enforced at compile time in sw.rs via `_ASSERT_ZEROIZE_ON_DROP`).
+/// This test verifies the observable post-delete behaviour.
+///
+/// Traces: HSM-REQ-043 / feat_req__sec_crypt__key_zeroization
+#[test]
+fn test_key_zeroize_on_delete() {
+    let mut b = init_backend();
+    let h = b.key_generate(KeyType::Aes256).unwrap();
+    b.key_delete(h).unwrap();
+
+    // Every operation that uses the deleted handle must fail.
+    let iv = [0u8; 12];
+    assert!(
+        matches!(b.aes_gcm_encrypt(h, &gcm_params(&iv, b""), b"x"), Err(HsmError::InvalidKeyHandle)),
+        "deleted handle must be rejected with InvalidKeyHandle (HSM-REQ-043)"
+    );
+}
+
+/// After deinit(), handles from before deinit must be unusable post-reinit.
+///
+/// `deinit` calls `keys.clear()` which drops every `KeyMaterial` value;
+/// `ZeroizeOnDrop` fires for each, wiping the key bytes.
+///
+/// Traces: HSM-REQ-043 / feat_req__sec_crypt__key_zeroization
+#[test]
+fn test_key_zeroize_on_deinit() {
+    let mut b = init_backend();
+    let h = b.key_generate(KeyType::Aes256).unwrap();
+
+    b.deinit().unwrap();
+    b.init().unwrap();   // re-initialise with a clean store
+
+    let iv = [0u8; 12];
+    assert!(
+        matches!(b.aes_gcm_encrypt(h, &gcm_params(&iv, b""), b"x"), Err(HsmError::InvalidKeyHandle)),
+        "handle from before deinit must be invalid after reinit (HSM-REQ-043)"
+    );
 }

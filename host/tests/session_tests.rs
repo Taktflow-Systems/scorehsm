@@ -44,7 +44,7 @@ fn make_session() -> HsmSession {
 fn test_session_own_handle_allowed() {
     let mut s = make_session();
     let h = s.key_generate(KeyType::Aes256).unwrap();
-    let digest = s.sha256(b"hello").unwrap();
+    let _digest = s.sha256(b"hello").unwrap();
     // Just verify no error — key belongs to this session
     let iv = [0u8; 12];
     let params = scorehsm_host::types::AesGcmParams { iv: &iv, aad: b"" };

@@ -4,6 +4,14 @@
 //! Satisfies all algorithmic requirements but NOT hardware isolation
 //! requirements (os_protection, no_key_exposure, reverse_eng_protection).
 //!
+//! # Security properties of this backend
+//!
+//! | Requirement        | Status  | Notes                                              |
+//! |--------------------|---------|---------------------------------------------------|
+//! | HSM-REQ-031/036    | NOT MET | Keys are in process heap — no TrustZone isolation  |
+//! | HSM-REQ-043        | MET     | ZeroizeOnDrop wipes key bytes on delete/deinit     |
+//! | HSM-REQ-045        | MET     | Compile-time cfg warning when hw-backend absent    |
+//!
 //! HSM-REQ-045: compile-time warning when built without hw-backend.
 #![cfg_attr(
     not(feature = "hw-backend"),
@@ -11,6 +19,7 @@
 )]
 
 use std::collections::HashMap;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::{HsmError, HsmResult};
 use crate::types::{AesGcmParams, EcdsaSignature, KeyHandle, KeyType};
@@ -20,13 +29,29 @@ use super::HsmBackend;
 /// Key material stored in-process (software backend only).
 ///
 /// Key material is held in heap memory. This does NOT satisfy HSM-REQ-031/036
-/// (TrustZone isolation). The hardware backend does.
+/// (TrustZone isolation) — the hardware backend provides that guarantee.
+///
+/// HSM-REQ-043: `ZeroizeOnDrop` guarantees that key bytes are overwritten with
+/// zeros whenever a slot is removed from the HashMap (`key_delete`) or when the
+/// entire store is cleared (`deinit`). This is enforced at compile time — see
+/// the `_ASSERT_ZEROIZE_ON_DROP` constant below.
+#[derive(Zeroize, ZeroizeOnDrop)]
 enum KeyMaterial {
     Aes256([u8; 32]),
     HmacSha256([u8; 32]),
     /// P-256 private scalar (big-endian, 32 bytes).
     EccP256([u8; 32]),
 }
+
+/// Compile-time proof that `KeyMaterial` implements `ZeroizeOnDrop`.
+///
+/// If this fails to compile, the zeroization guarantee (HSM-REQ-043) is broken.
+/// This makes the security property machine-checkable, not just a comment.
+#[allow(dead_code)]
+const _ASSERT_ZEROIZE_ON_DROP: fn() = || {
+    fn require_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+    require_zeroize_on_drop::<KeyMaterial>();
+};
 
 /// Software fallback backend.
 pub struct SoftwareBackend {
@@ -74,6 +99,8 @@ impl HsmBackend for SoftwareBackend {
 
     fn deinit(&mut self) -> HsmResult<()> {
         self.initialized = false;
+        // ZeroizeOnDrop fires for every `KeyMaterial` value dropped by `clear`.
+        // HSM-REQ-043: all key material is zeroized before the store is emptied.
         self.keys.clear();
         Ok(())
     }
@@ -106,13 +133,69 @@ impl HsmBackend for SoftwareBackend {
         Ok(handle)
     }
 
-    fn key_import(&mut self, _key_type: KeyType, _wrapped: &[u8]) -> HsmResult<KeyHandle> {
-        // TODO: unwrap using a wrapping key (KEK) — HSM-REQ-020
-        Err(HsmError::Unsupported)
+    fn key_import(&mut self, key_type: KeyType, material: &[u8]) -> HsmResult<KeyHandle> {
+        self.check_init()?;
+        // ── Software backend vs hardware backend behavior ─────────────────────
+        //
+        // Software backend (this code): accepts raw, unwrapped key bytes.
+        // This is intentional — the software backend provides no hardware
+        // isolation, so KEK-wrapping offers no additional protection.  Raw
+        // import is acceptable here for provisioning known test keys and for
+        // exercising the key_derive / ECDH symmetry test paths.
+        //
+        // Hardware backend (STM32L552 — HSM-REQ-022): imported material MUST
+        // be wrapped under the device KEK provisioned at manufacturing time.
+        // The KEK never leaves the Secure-world keystore.  Raw import on the
+        // hardware backend is explicitly prohibited and will be rejected by the
+        // firmware with ErrBadParam.
+        //
+        // Callers MUST NOT use the software backend for production key
+        // provisioning.  The distinction is enforced by documentation and by
+        // the hardware backend's implementation — not by this code path.
+        // ─────────────────────────────────────────────────────────────────────
+        let km = match key_type {
+            KeyType::Aes256 => {
+                let bytes: [u8; 32] = material
+                    .try_into()
+                    .map_err(|_| HsmError::InvalidParam(
+                        "AES-256 key must be exactly 32 bytes".into()
+                    ))?;
+                KeyMaterial::Aes256(bytes)
+            }
+            KeyType::HmacSha256 => {
+                let bytes: [u8; 32] = material
+                    .try_into()
+                    .map_err(|_| HsmError::InvalidParam(
+                        "HMAC-SHA256 key must be exactly 32 bytes".into()
+                    ))?;
+                KeyMaterial::HmacSha256(bytes)
+            }
+            KeyType::EccP256 => {
+                let bytes: [u8; 32] = material
+                    .try_into()
+                    .map_err(|_| HsmError::InvalidParam(
+                        "P-256 scalar must be exactly 32 bytes".into()
+                    ))?;
+                // Validate the scalar represents a valid P-256 private key
+                // before storing it.  A zero scalar and scalars >= the curve
+                // order are rejected here rather than producing a silently
+                // broken key handle.
+                p256::SecretKey::from_bytes(&bytes.into())
+                    .map_err(|_| HsmError::InvalidParam(
+                        "material is not a valid P-256 scalar".into()
+                    ))?;
+                KeyMaterial::EccP256(bytes)
+            }
+        };
+        let handle = self.alloc_handle();
+        self.keys.insert(handle.0, km);
+        Ok(handle)
     }
 
     fn key_delete(&mut self, handle: KeyHandle) -> HsmResult<()> {
         self.check_init()?;
+        // ZeroizeOnDrop fires when `remove` drops the evicted `KeyMaterial`.
+        // HSM-REQ-043: key bytes are overwritten with zeros before the slot is freed.
         self.keys.remove(&handle.0).ok_or(HsmError::InvalidKeyHandle)?;
         Ok(())
     }

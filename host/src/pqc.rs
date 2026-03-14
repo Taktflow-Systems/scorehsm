@@ -17,11 +17,11 @@ mod pqc_impl {
     };
     use pqcrypto_kyber::kyber768::{
         self, PublicKey as KyberPublicKey, SecretKey as KyberSecretKey,
-        Ciphertext as KyberCiphertext, SharedSecret as KyberSharedSecret,
+        Ciphertext as KyberCiphertext,
     };
     use pqcrypto_traits::{
-        sign::{PublicKey as _, SecretKey as _, SignedMessage as _},
-        kem::{PublicKey as _, SecretKey as _, Ciphertext as _, SharedSecret as _},
+        sign::SignedMessage as _,
+        kem::{Ciphertext as _, SharedSecret as _},
     };
     use crate::error::{HsmError, HsmResult};
 

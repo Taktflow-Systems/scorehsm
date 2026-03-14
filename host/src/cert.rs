@@ -15,12 +15,8 @@ mod certs_impl {
     use x509_cert::{
         Certificate,
         der::{Decode, Encode},
-        spki::AlgorithmIdentifierRef,
     };
-    use crate::{
-        error::{HsmError, HsmResult},
-        types::EcdsaSignature,
-    };
+    use crate::error::{HsmError, HsmResult};
 
     /// Parse a DER-encoded X.509 certificate.
     ///
@@ -84,33 +80,37 @@ mod certs_impl {
 
     /// Verify a chain of certificates against a trust anchor (root CA public key).
     ///
-    /// `chain[0]` is the leaf; `chain[last]` is signed by the trust anchor.
-    /// Returns `Ok(())` if the entire chain is valid.
+    /// `chain[0]` is the leaf; `chain[last]` must be signed by `trust_anchor_pk`.
+    /// Each certificate in the chain must be signed by its immediate successor.
+    ///
+    /// Returns `Ok(())` if every signature in the chain is valid.
+    ///
+    /// # Errors
+    ///
+    /// - `HsmError::InvalidParam` — chain is empty.
+    /// - `HsmError::CryptoFail`  — any signature in the chain is invalid, or
+    ///   a public key cannot be extracted from an intermediate certificate.
+    /// - `HsmError::Unsupported` — a certificate uses an algorithm other than
+    ///   ECDSA-P256 (OID 1.2.840.10045.4.3.2).
     pub fn verify_chain(chain: &[Certificate], trust_anchor_pk: &[u8; 65]) -> HsmResult<()> {
         if chain.is_empty() {
             return Err(HsmError::InvalidParam("empty certificate chain".into()));
         }
 
-        // Verify leaf signed by intermediate (or trust anchor if chain len == 1)
-        let mut issuer_pk: [u8; 65] = if chain.len() == 1 {
-            *trust_anchor_pk
-        } else {
-            extract_ec_public_key(&chain[1])?
-        };
-
+        // Walk from leaf (index 0) to root (index len-1).
+        // Each certificate's issuer key is the next certificate's subject key,
+        // except for the root whose issuer is the out-of-band trust anchor.
         for i in 0..chain.len() {
-            let issuer_key = if i + 1 < chain.len() {
+            let issuer_key: [u8; 65] = if i + 1 < chain.len() {
                 extract_ec_public_key(&chain[i + 1])?
             } else {
                 *trust_anchor_pk
             };
             if !verify_cert_signature(&chain[i], &issuer_key)? {
                 return Err(HsmError::CryptoFail(format!(
-                    "certificate {} failed signature verification", i
+                    "certificate {} signature verification failed", i
                 )));
             }
-            let _ = issuer_pk; // suppress unused warning
-            issuer_pk = issuer_key;
         }
         Ok(())
     }
