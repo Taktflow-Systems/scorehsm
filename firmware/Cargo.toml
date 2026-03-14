@@ -15,10 +15,9 @@ embassy-executor  = { git = "https://github.com/embassy-rs/embassy", features = 
 embassy-stm32     = { git = "https://github.com/embassy-rs/embassy", features = [
     "stm32l552ze",
     "time-driver-any",
-    "memory-x",
     "unstable-pac",
     "exti",
-] }
+] }  # memory-x removed: custom memory.x / memory-tz.x provided via build.rs
 embassy-time      = { git = "https://github.com/embassy-rs/embassy", features = [
     "tick-hz-32_768",
 ] }
@@ -45,6 +44,10 @@ chacha20poly1305 = { version = "0.10", default-features = false }
 rand_core      = { version = "0.6", default-features = false }
 zeroize        = { version = "1", default-features = false, features = ["derive"] }
 heapless       = "0.8"
+
+[features]
+default = []
+trustzone = []     # Enable TrustZone: S-world flash alias, SAU config, SRAM2 isolation
 
 [profile.release]
 codegen-units = 1
