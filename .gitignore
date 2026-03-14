@@ -1,0 +1,20 @@
+# Rust
+target/
+Cargo.lock
+
+# Private working notes
+private/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Probe/debug
+*.elf
+*.bin
+*.hex
+*.map
