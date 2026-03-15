@@ -16,6 +16,7 @@ embassy-stm32     = { git = "https://github.com/embassy-rs/embassy", rev = "088d
     "time-driver-any",
     "unstable-pac",
     "exti",
+    "dual-bank",
 ] }  # memory-x removed: custom memory.x / memory-tz.x provided via build.rs
 embassy-time      = { git = "https://github.com/embassy-rs/embassy", rev = "088d0cfb", features = [
     "tick-hz-32_768",
