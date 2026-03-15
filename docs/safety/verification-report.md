@@ -1,6 +1,6 @@
 # scorehsm — Software Verification Report
 
-Date: 2026-03-14
+Date: 2026-03-15
 Status: CONDITIONALLY PASSED
 ASIL Target: ASIL B
 Classification: SEooC (Safety Element out of Context)
@@ -11,13 +11,15 @@ ISO 26262 Reference: Part 6, Clause 11 (Software Testing), Clause 12 (Software S
 
 ## 1. Purpose
 
-This document is the software verification report for the `scorehsm-host` Rust library. It records all verification activities performed against the software safety requirements (HSM-REQ-001 through HSM-REQ-049) as of 2026-03-14, in accordance with ISO 26262-6:2018 Clause 11 (software testing) and Clause 12 (software safety requirements verification).
+This document is the software verification report for the `scorehsm-host` Rust library. It records all verification activities performed against the software safety requirements (HSM-REQ-001 through HSM-REQ-049) as of 2026-03-15, in accordance with ISO 26262-6:2018 Clause 11 (software testing) and Clause 12 (software safety requirements verification).
 
 This report is a mandatory work product for the ASIL B SEooC safety case (`docs/safety/safety-case.md`). It constitutes the primary evidence for the verification sub-claims G2, G4, G5, and the code review evidence supporting G3.
 
 This report covers the `scorehsm-host` library software backend testing only. Hardware-in-the-loop (HIL) verification of the `HardwareBackend` and L55 firmware is a separate work product that will be documented in a dedicated HIL test report when the Nucleo board CI rig is operational.
 
 **Rev 1.1 update (2026-03-14):** Section 11 added. Records the completion of the full ISO 26262-6 V-model for ASIL B, including 9 new safety documents, 28 new Software Safety Requirements (HSM-REQ-050..077), `MockHardwareBackend` implementation with 13 new unit tests carrying formal V-model traceability (0 warnings), bidirectional test traceability (SCORE-UTT), DFA (SCORE-DFA), and tool qualification records (SCORE-TQR). The ~110 original integration tests in `host/tests/` continue to pass. In addition, 52 integration tests (SCORE-ITP) and 57 qualification tests (SCORE-QTE) are newly specified and pending implementation.
+
+**Rev 1.2 update (2026-03-15):** Phase 9 (CI + project files) and Phase 10 evidence collection complete. All 58 integration tests (SCORE-ITP) and 57 qualification tests (SCORE-QTE) are now implemented and passing. Total test count: 274 (54 unit + 58 ITP + 57 QTE + 104 feature/backend + 1 doc-test). CI pipeline (GitHub Actions) with 4 host jobs green (Test, Clippy, Format, Coverage). Clippy: 0 warnings. Coverage: lcov artifact generated in CI, text % pending extraction.
 
 ---
 
@@ -68,7 +70,7 @@ The following items are explicitly out of scope for this verification report:
 
 **Method:** All 49 HSM-REQ items are mapped to at least one test case. Tests are requirements-based: each test exercises a specific normative requirement by constructing inputs that fall within the requirement's scope, invoking the relevant API, and asserting that the output matches the requirement specification. Test names are correlated with HSM-REQ identifiers in the test strategy (`docs/test-strategy/test-strategy.md`) and in test source file comments using the convention `// HSM-REQ-NNN`.
 
-**Result:** 110 passing tests as of 2026-03-14. Zero failures. The total is a rounded figure; exact counts by module are shown in Section 4. Pqc_tests require Linux CI due to a linker issue on Windows; the figure of 110 is inclusive of pqc_tests when run on Linux.
+**Result:** 274 passing tests as of 2026-03-15. Zero failures. Exact counts by module are shown in Section 4. Pqc_tests require Linux CI due to a linker issue on Windows; the figure of 274 excludes pqc_tests (4 additional on Linux).
 
 **Requirements coverage:** 29 requirements ✅ fully tested by software-only tests; 13 requirements ⚠️ partially covered or with planned additions; 7 requirements ℹ️ require HIL testing (hardware-only verification). See Section 5 (Requirements Coverage Matrix).
 
@@ -190,15 +192,24 @@ The following items are explicitly out of scope for this verification report:
 
 | Module | File | Tests | Notes |
 |---|---|---|---|
-| Unit tests | `host/src/lib.rs` | 3 | SHA-256 known vectors, sha2 crate cross-check, arithmetic sanity |
-| Software backend | `host/tests/sw_backend_tests.rs` | 44 | 37 original + 7 new (5 key_import + 2 zeroization) |
-| Session layer | `host/tests/session_tests.rs` | 22 | 7 original + 15 new (IDS all 7 variants, rate limit all 4 ops + window reset, deinit, key_import owned) |
-| Secure update | `host/tests/update_tests.rs` | 8 | Full verify_update_image coverage |
-| Feature activation | `host/tests/feature_activation_tests.rs` | 13 | Full verify_activation_token coverage |
-| Onboard communication | `host/tests/onboard_comm_tests.rs` | 4 | IKEv2 and MACSec key derivation |
+| Unit tests (lib + mock) | `host/src/lib.rs` | 54 | SHA-256 KAT, mock backend, safety services |
+| Software backend | `host/tests/sw_backend_tests.rs` | 48 | Key import, zeroization, ECDH, algorithm coverage |
+| Session layer | `host/tests/session_tests.rs` | 16 | IDS events, rate limits, lifecycle, handle isolation |
+| Secure update | `host/tests/update_tests.rs` | 10 | Signature verify, version rollback, property-based |
+| Feature activation | `host/tests/feature_activation_tests.rs` | 15 | Activation tokens, replay detection, property-based |
+| Onboard communication | `host/tests/onboard_comm_tests.rs` | 7 | IKEv2 and MACSec key derivation |
 | Certificate management | `host/tests/cert_tests.rs` | 7 | Requires `--features certs` |
-| Post-quantum | `host/tests/pqc_tests.rs` | 4 | Requires `--features pqc`; Linux CI only (Windows linker issue) |
-| **Total** | | **~110** | Exact count varies by platform due to pqc linker issue on Windows |
+| Constant-time | `host/tests/constant_time_tests.rs` | 1 | Statistical timing verification |
+| Integration: Transport | `host/tests/integration_transport.rs` | 14 | TSR-TIG CRC, seq, timeout, retry |
+| Integration: Nonce | `host/tests/integration_nonce.rs` | 8 | TSR-NMG nonce management, HKDF domain |
+| Integration: Session | `host/tests/integration_session.rs` | 10 | TSR-SMG handle isolation, timeout, max sessions |
+| Integration: Rate Limit | `host/tests/integration_rate_limit.rs` | 5 | TSR-RLG token bucket, configurable limits |
+| Integration: Safe State | `host/tests/integration_safe_state.rs` | 10 | TSR-SSG state machine, checksum, safe state entry |
+| Integration: Identity | `host/tests/integration_identity.rs` | 7 | TSR-IVG startup handshake, device identity |
+| Integration: POST | `host/tests/integration_post.rs` | 4 | POST/KAT AES-GCM, ECDSA, failure path |
+| Qualification tests | `host/tests/qualification_tests.rs` | 57 | All 16 FSRs (FSR-01 through FSR-16) |
+| Doc-tests | `host/src/` | 1 | API usage examples |
+| **Total** | | **274** | `cargo test --workspace --features "mock,certs"` |
 
 ### 4.2 Test Count by Development Session
 
@@ -223,7 +234,10 @@ The test count increased from 73 (as documented in `docs/test-strategy/test-stra
 | CI run (default features) | 2026-03-14 | Windows 11 | PASSED | 106 (pqc excluded) |
 | CI run (`--features certs`) | 2026-03-14 | Windows 11 | PASSED | 7 additional |
 | CI run (`--features pqc`) | Pending | Linux CI | Expected: PASSED | 4 additional |
-| **Combined total** | | | **PASSED** | **~110** |
+| **Combined total (2026-03-14)** | | | **PASSED** | **~110** |
+| CI run (all host jobs) | 2026-03-15 | Ubuntu (GitHub Actions) | PASSED | 274 (4 jobs green) |
+| Local run (`--features "mock,certs"`) | 2026-03-15 | Windows 11 | PASSED | 274 |
+| **Combined total (2026-03-15)** | | | **PASSED** | **274** |
 
 ---
 
@@ -460,17 +474,19 @@ The following modules were reviewed with no findings requiring remediation:
 
 ### 8.2 Current Measurement Status
 
-**Status: PENDING — Linux CI run required**
+**Status: INFRASTRUCTURE OPERATIONAL — percentage extraction pending**
 
-Coverage measurement via `cargo-llvm-cov` requires a Linux CI runner. The Windows CI environment has a linker incompatibility when building the `pqc` feature with instrumentation, which affects the overall instrumented build. A Linux CI runner is being added to the CI configuration (open item OI-03 in safety-plan.md).
+Coverage measurement via `cargo-llvm-cov` runs in the GitHub Actions CI pipeline (Ubuntu `ubuntu-latest`). The Coverage job generates an `lcov.info` artifact on every push to `main` and every PR. The CI run on 2026-03-15 (run #23099513024) completed successfully with 274 tests instrumented and lcov output generated.
 
 **Coverage infrastructure readiness:**
-- `cargo-llvm-cov` is installed and pinned in `Cargo.toml`
-- Coverage CI step is defined in the GitHub Actions workflow
-- Coverage artifacts are configured to be output to `target/llvm-cov/`
-- Coverage gates (fail if below 85%/80%) are configured in the CI step
+- `cargo-llvm-cov` is installed via `taiki-e/install-action@cargo-llvm-cov` in CI
+- Coverage CI step is defined in `.github/workflows/ci.yml` (job: `coverage`)
+- Coverage output: `lcov.info` (uploaded to Codecov when token is configured)
+- CI job: GREEN as of 2026-03-15
 
-**Engineering estimate:** Based on the test density (110 tests across 49 requirements), the breadth of error injection testing (every `HsmError` variant exercised), and the boundary value coverage (all major boundary conditions exercised), the software backend is expected to meet or exceed the ≥85%/≥80% targets. This is an engineering estimate — formal measurement is required before this claim can be treated as verified evidence.
+**Next step:** Extract statement/branch coverage percentages from lcov output or configure `cargo llvm-cov --text` in CI for human-readable summary. Codecov integration provides dashboard once `CODECOV_TOKEN` secret is configured.
+
+**Engineering estimate:** Based on the test density (274 tests across 77 requirements), the breadth of error injection testing (every `HsmError` variant exercised), and the boundary value coverage (all major boundary conditions exercised), the software backend is expected to meet or exceed the ≥85%/≥80% targets. This is an engineering estimate — formal measurement with extracted percentages is required before this claim can be treated as verified evidence.
 
 ### 8.3 TCL-2 Tool Validation
 
@@ -545,7 +561,7 @@ The following evidence supports the conditional pass verdict:
 
 | Evidence Item | Status |
 |---|---|
-| 110 passing tests across all HSM-REQ software-layer requirements | CONFIRMED |
+| 274 passing tests across all HSM-REQ software-layer requirements | CONFIRMED |
 | 0 clippy warnings; 0 unsafe blocks; 0 missing docs | CONFIRMED |
 | All `HsmError` variants exercised by negative tests | CONFIRMED |
 | All `IdsEvent` variants exercised by IDS tests | CONFIRMED |
@@ -651,16 +667,18 @@ test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 | Source | Tests | Status |
 |---|---|---|
-| Original software backend + session + cert + pqc tests (`host/tests/`) | ~110 | Passing |
-| New MockHardwareBackend unit tests with formal V-model traceability (`mock.rs`) | 13 | Passing |
-| **Currently passing total** | **~123** | |
-| Integration tests specified in SCORE-ITP | 52 | Specified — pending implementation |
-| Qualification tests specified in SCORE-QTE | 57 | Specified — pending implementation |
+| Unit tests in `host/src/` (lib + mock backend) | 54 | Passing |
+| Feature/backend tests in `host/tests/` (sw_backend, session, update, activation, onboard_comm, cert, constant_time) | 104 | Passing |
+| Integration tests (SCORE-ITP) in `host/tests/integration_*.rs` | 58 | Implemented — passing |
+| Qualification tests (SCORE-QTE) in `host/tests/qualification_tests.rs` | 57 | Implemented — passing |
+| Doc-tests | 1 | Passing |
+| **Currently passing total** | **274** | |
 | HIL tests specified in SCORE-ITP §6 | 4 | Pending hardware rig |
-| **Grand total specified** | **236** | |
+| PQC tests (`--features pqc`, Linux only) | 4 | Expected passing (Windows linker issue) |
+| **Grand total specified** | **282** | |
 
-Note: The 13 unit tests in `mock.rs` have full bidirectional traceability to SSRs (SCORE-UTT).
-The ~110 original tests in `host/tests/` exercise the same code paths but predate the formal
+Note: The unit tests in `mock.rs` have full bidirectional traceability to SSRs (SCORE-UTT).
+The feature/backend tests in `host/tests/` exercise the same code paths but predate the formal
 V-model and lack SSR-level traceability. Assigning them to the V-model traceability chain is
 an open item before ASIL B sign-off.
 

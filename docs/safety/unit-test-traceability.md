@@ -1,8 +1,8 @@
 # scorehsm — Unit Test Traceability Matrix
 
-Date: 2026-03-14
+Date: 2026-03-15
 Standard: ISO 26262-6:2018 §9 / §10
-Status: RELEASED
+Status: RELEASED (Rev 1.1)
 ASIL Target: ASIL B
 Document ID: SCORE-UTT
 
@@ -26,7 +26,7 @@ This document provides the **bidirectional traceability** between Software Safet
 | CI runner | GitHub Actions `ubuntu-latest`, `windows-latest` |
 | Target ASIL B coverage | ≥85% statement, ≥80% branch (ISO 26262-6 Table 10) |
 | Test binary | `scorehsm-host` lib tests (`cargo test --lib`) |
-| Current result | **13/13 pass, 0 warnings** (2026-03-14) |
+| Current result | **274/274 pass, 0 warnings** (2026-03-15) |
 
 ---
 
@@ -42,39 +42,39 @@ For each Software Safety Requirement, the tests that verify it are listed.
 | HSM-REQ-051 | Sequence number mismatch → `HsmError::ProtocolError` | `test_seq_mismatch_injection` | `backend::mock::tests` | `inject_seq_mismatch: true` | ✓ |
 | HSM-REQ-051 | Sequence overflow at `0xFFFF_FFFF` → `HsmError::SequenceOverflow` | `test_sequence_overflow` | `backend::mock::tests` | `seq_counter.store(u32::MAX)` | ✓ |
 | HSM-REQ-052 | Command timeout → `HsmError::Timeout` | `test_timeout_injection` | `backend::mock::tests` | `inject_timeout: true` | ✓ |
-| HSM-REQ-053 | Safe state after 3 consecutive transport failures | *See Step 10 — integration test* | — | — | ⏳ |
-| HSM-REQ-054 | Retry with back-off (max 2 retries) | *See Step 10 — integration test* | — | — | ⏳ |
+| HSM-REQ-053 | Safe state after 3 consecutive transport failures | `integration_safe_state` tests | `host/tests/integration_safe_state.rs` | Consecutive CRC failures | ✓ |
+| HSM-REQ-054 | Retry with back-off (max 2 retries) | `integration_transport` tests | `host/tests/integration_transport.rs` | Retry counting | ✓ |
 
 ### 14b — Nonce Management
 
 | SSR ID | Requirement Summary | Test ID | Test Location | Fault Injected | Pass |
 |---|---|---|---|---|---|
-| HSM-REQ-055 | Pre-increment nonce before AEAD; reject on overflow | *See Step 10 — NonceManager integration test* | — | — | ⏳ |
+| HSM-REQ-055 | Pre-increment nonce before AEAD; reject on overflow | `integration_nonce` tests | `host/tests/integration_nonce.rs` | Nonce overflow | ✓ |
 | HSM-REQ-056 | HKDF empty info string → `HsmError::InvalidArgument` | `test_hkdf_empty_info_rejected` | `backend::mock::tests` | Empty `info` slice | ✓ |
-| HSM-REQ-057 | HKDF domain separation; distinct info strings per algorithm | *See Step 10 — HKDF domain test* | — | — | ⏳ |
+| HSM-REQ-057 | HKDF domain separation; distinct info strings per algorithm | `integration_nonce` tests | `host/tests/integration_nonce.rs` | Domain separation | ✓ |
 
 ### 14c — Session Management
 
 | SSR ID | Requirement Summary | Test ID | Test Location | Fault Injected | Pass |
 |---|---|---|---|---|---|
-| HSM-REQ-058 | Cross-session handle isolation → `HsmError::InvalidHandle` | *See Step 10 — session integration test* | — | — | ⏳ |
-| HSM-REQ-059 | Session inactivity timeout (300 s default) | *See Step 10 — session timeout test* | — | — | ⏳ |
-| HSM-REQ-060 | Max 8 concurrent sessions → `HsmError::ResourceExhausted` | *See Step 10 — session limit test* | — | — | ⏳ |
+| HSM-REQ-058 | Cross-session handle isolation → `HsmError::InvalidHandle` | `integration_session` tests | `host/tests/integration_session.rs` | Cross-session handle use | ✓ |
+| HSM-REQ-059 | Session inactivity timeout (300 s default) | `integration_session` tests | `host/tests/integration_session.rs` | MockClock timeout | ✓ |
+| HSM-REQ-060 | Max 8 concurrent sessions → `HsmError::ResourceExhausted` | `integration_session` tests | `host/tests/integration_session.rs` | Session limit exceeded | ✓ |
 
 ### 14d — Rate Limiting
 
 | SSR ID | Requirement Summary | Test ID | Test Location | Fault Injected | Pass |
 |---|---|---|---|---|---|
-| HSM-REQ-061 | Rate limit exceeded → `HsmError::RateLimitExceeded` (no queue) | *See Step 10 — rate limit integration test* | — | — | ⏳ |
-| HSM-REQ-062 | Rate limits configurable via `HsmConfig::rate_limits` | *See Step 10 — config test* | — | — | ⏳ |
+| HSM-REQ-061 | Rate limit exceeded → `HsmError::RateLimitExceeded` (no queue) | `integration_rate_limit` tests | `host/tests/integration_rate_limit.rs` | Burst exhaustion | ✓ |
+| HSM-REQ-062 | Rate limits configurable via `HsmConfig::rate_limits` | `integration_rate_limit` tests | `host/tests/integration_rate_limit.rs` | Custom config | ✓ |
 
 ### 14e — Safe State
 
 | SSR ID | Requirement Summary | Test ID | Test Location | Fault Injected | Pass |
 |---|---|---|---|---|---|
 | HSM-REQ-063 | Hardware fault opcode → `HsmError::HardwareFault` | `test_hw_fault_injection` | `backend::mock::tests` | `inject_hw_fault: true` | ✓ |
-| HSM-REQ-064 | `SafeState` blocks all operations → `HsmError::SafeState` | *See Step 10 — state machine test* | — | — | ⏳ |
-| HSM-REQ-065 | Key store CRC-32 checksum; mismatch → `HsmError::IntegrityViolation` | *See Step 10 — checksum test* | — | — | ⏳ |
+| HSM-REQ-064 | `SafeState` blocks all operations → `HsmError::SafeState` | `integration_safe_state` tests | `host/tests/integration_safe_state.rs` | SafeState entry | ✓ |
+| HSM-REQ-065 | Key store CRC-32 checksum; mismatch → `HsmError::IntegrityViolation` | `integration_safe_state` tests | `host/tests/integration_safe_state.rs` | Checksum corruption | ✓ |
 
 ### 14f — Key Lifecycle
 
@@ -88,15 +88,15 @@ For each Software Safety Requirement, the tests that verify it are listed.
 
 | SSR ID | Requirement Summary | Test ID | Test Location | Fault Injected | Pass |
 |---|---|---|---|---|---|
-| HSM-REQ-068 | Startup capability handshake; VID/PID + firmware version | *See Step 10 — init handshake test* | — | — | ⏳ |
-| HSM-REQ-069 | Device identity change → `HsmError::DeviceIdentityChanged` | *See Step 10 — device identity test* | — | — | ⏳ |
+| HSM-REQ-068 | Startup capability handshake; VID/PID + firmware version | `integration_identity` tests | `host/tests/integration_identity.rs` | Handshake verify | ✓ |
+| HSM-REQ-069 | Device identity change → `HsmError::DeviceIdentityChanged` | `integration_identity` tests | `host/tests/integration_identity.rs` | Identity mismatch | ✓ |
 
 ### 14h — Cryptographic Correctness
 
 | SSR ID | Requirement Summary | Test ID | Test Location | Fault Injected | Pass |
 |---|---|---|---|---|---|
-| HSM-REQ-070 | Certificate `notBefore`/`notAfter` validity window check | *See Step 10 — cert validity test* | — | — | ⏳ |
-| HSM-REQ-071 | Clock unavailable → reject cert operations | *See Step 10 — clock test* | — | — | ⏳ |
+| HSM-REQ-070 | Certificate `notBefore`/`notAfter` validity window check | `integration_identity` tests | `host/tests/integration_identity.rs` | Cert validity window | ✓ |
+| HSM-REQ-071 | Clock unavailable → reject cert operations | `integration_identity` tests | `host/tests/integration_identity.rs` | Clock failure | ✓ |
 
 ### 14i — Output Integrity
 
@@ -109,9 +109,9 @@ For each Software Safety Requirement, the tests that verify it are listed.
 
 | SSR ID | Requirement Summary | Test ID | Test Location | Fault Injected | Pass |
 |---|---|---|---|---|---|
-| HSM-REQ-074 | AES-GCM KAT executed at startup | *See Step 10 — POST test* | — | — | ⏳ |
-| HSM-REQ-075 | ECDSA KAT executed at startup | *See Step 10 — POST test* | — | — | ⏳ |
-| HSM-REQ-076 | KAT fail → `HsmError::SelfTestFailed`, library stays in `Initializing` | *See Step 10 — POST failure test* | — | — | ⏳ |
+| HSM-REQ-074 | AES-GCM KAT executed at startup | `integration_post` tests | `host/tests/integration_post.rs` | AES-GCM KAT | ✓ |
+| HSM-REQ-075 | ECDSA KAT executed at startup | `integration_post` tests | `host/tests/integration_post.rs` | ECDSA KAT | ✓ |
+| HSM-REQ-076 | KAT fail → `HsmError::SelfTestFailed`, library stays in `Initializing` | `integration_post` tests | `host/tests/integration_post.rs` | KAT failure injection | ✓ |
 
 ### 14k — Hardware Simulation
 
@@ -144,26 +144,26 @@ For each Software Safety Requirement, the tests that verify it are listed.
 
 ## 5. Coverage Summary
 
-### Unit test coverage at Step 8 (mock tests only)
+### SSR coverage (unit + integration tests)
 
-| SSR Group | Total SSRs | Unit-tested | Integration-pending |
-|---|---|---|---|
-| 14a Transport Integrity (REQ-050..054) | 5 | 4 | 1 (retry/safe state) |
-| 14b Nonce Management (REQ-055..057) | 3 | 1 | 2 |
-| 14c Session Management (REQ-058..060) | 3 | 0 | 3 |
-| 14d Rate Limiting (REQ-061..062) | 2 | 0 | 2 |
-| 14e Safe State (REQ-063..065) | 3 | 1 | 2 |
-| 14f Key Lifecycle (REQ-066..067) | 2 | 2 | 0 |
-| 14g Operational Verification (REQ-068..069) | 2 | 0 | 2 |
-| 14h Cryptographic Correctness (REQ-070..071) | 2 | 0 | 2 |
-| 14i Output Integrity (REQ-072..073) | 2 | 2 | 0 |
-| 14j POST / KAT (REQ-074..076) | 3 | 0 | 3 |
-| 14k Hardware Simulation (REQ-077) | 1 | 1 | 0 |
-| **Total** | **28** | **11** | **17** |
+| SSR Group | Total SSRs | Unit-tested | Integration-tested | Total covered |
+|---|---|---|---|---|
+| 14a Transport Integrity (REQ-050..054) | 5 | 4 | 1 | **5** |
+| 14b Nonce Management (REQ-055..057) | 3 | 1 | 2 | **3** |
+| 14c Session Management (REQ-058..060) | 3 | 0 | 3 | **3** |
+| 14d Rate Limiting (REQ-061..062) | 2 | 0 | 2 | **2** |
+| 14e Safe State (REQ-063..065) | 3 | 1 | 2 | **3** |
+| 14f Key Lifecycle (REQ-066..067) | 2 | 2 | 0 | **2** |
+| 14g Operational Verification (REQ-068..069) | 2 | 0 | 2 | **2** |
+| 14h Cryptographic Correctness (REQ-070..071) | 2 | 0 | 2 | **2** |
+| 14i Output Integrity (REQ-072..073) | 2 | 2 | 0 | **2** |
+| 14j POST / KAT (REQ-074..076) | 3 | 0 | 3 | **3** |
+| 14k Hardware Simulation (REQ-077) | 1 | 1 | 0 | **1** |
+| **Total** | **28** | **11** | **17** | **28** |
 
-**Unit test SSR coverage: 11/28 (39%) direct; remaining 17 SSRs covered at integration test level (Step 10).**
+**SSR coverage: 28/28 (100%) — 11 at unit level, 17 at integration level.**
 
-> Note: ISO 26262-6 does not require 100% unit-test coverage of each SSR. The standard requires that requirements are verified by tests at an appropriate level (unit, integration, or system). Session/rate-limit/POST SSRs require a multi-component environment that makes integration tests the appropriate level.
+> Note: ISO 26262-6 does not require 100% unit-test coverage of each SSR. The standard requires that requirements are verified by tests at an appropriate level (unit, integration, or system). Session/rate-limit/POST SSRs require a multi-component environment that makes integration tests the appropriate level. All 17 previously pending SSRs are now covered by passing integration tests (58 ITP tests in `host/tests/integration_*.rs`).
 
 ### ASIL B Statement/Branch Coverage Target
 
@@ -203,8 +203,9 @@ All gaps are tracked in the integration test plan (SCORE-ITP, Step 10).
 
 | Date | Commit | Command | Result | Evidence |
 |---|---|---|---|---|
-| 2026-03-14 | Current | `cargo test --lib` | 13 passed, 0 failed, 0 warnings | CI artifact (pending) |
+| 2026-03-14 | Initial | `cargo test --lib` | 13 passed, 0 failed, 0 warnings | CI artifact (pending) |
+| 2026-03-15 | Current | `cargo test --workspace --features "mock,certs"` | 274 passed, 0 failed, 0 warnings | CI run #23099513024 (4/4 host jobs green) |
 
 ---
 
-*Document end — SCORE-UTT rev 1.0 — 2026-03-14*
+*Document end — SCORE-UTT rev 1.1 — 2026-03-15*

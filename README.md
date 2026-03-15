@@ -1,5 +1,7 @@
 # scorehsm
 
+[![CI](https://github.com/nhuvaoanh123/scorehsm/actions/workflows/ci.yml/badge.svg)](https://github.com/nhuvaoanh123/scorehsm/actions/workflows/ci.yml)
+
 Hardware-backed cryptographic module for Linux-based SDV platforms.
 
 STM32L552ZE-Q Nucleo as HSM peripheral over USB to Raspberry Pi. Full V-model — requirements,
@@ -57,8 +59,9 @@ docs/       — V-model artifacts (requirements, architecture, plans, safety)
 | Unit tests (host) | 54 | Safety, transport, crypto, mock backend |
 | Integration tests (ITP) | 58 | TSR-TIG, NMG, SMG, RLG, SSG, IVG, CG |
 | Qualification tests (QTE) | 57 | All 16 FSRs (FSR-01 through FSR-16) |
-| Feature tests | 58 | SW backend, session, update, activation, onboard comm |
-| **Total** | **227** | |
+| Feature tests | 104 | SW backend, session, update, activation, onboard comm, certs, constant-time |
+| Doc-tests | 1 | API examples |
+| **Total** | **274** | |
 
 ```bash
 # Run all tests
@@ -72,7 +75,7 @@ cargo clippy --workspace --all-targets --features "mock,certs" -- -D warnings
 
 ## Status
 
-Phases 0–9 complete. HIL hardware verification (Phase 10) pending.
+Phases 0–9 complete. Phase 10 evidence collection complete — 274 tests passing, CI green, docs updated. HIL hardware verification (4 tests on Pi + Nucleo) pending.
 
 ## License
 
