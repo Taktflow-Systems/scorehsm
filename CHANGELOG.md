@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Pinned the firmware toolchain to `nightly-2026-03-14`; basis: Embassy rev `088d0cfb` and `firmware/Cargo.lock` SHA-256 prefix `0c99d46c54ab`.
+
 ## [0.1.0-alpha] - 2026-03-15
 
 ### Added

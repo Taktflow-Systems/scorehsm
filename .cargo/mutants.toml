@@ -1,0 +1,6 @@
+examine_globs = ["host/src/update.rs", "host/src/feature_activation.rs"]
+features = ["mock", "certs"]
+cap_lints = true
+test_workspace = false
+minimum_test_timeout = 30.0
+timeout_multiplier = 4.0

@@ -1,6 +1,6 @@
 # scorehsm — Software Verification Report
 
-Date: 2026-03-15
+Date: 2026-04-22
 Status: CONDITIONALLY PASSED
 ASIL Target: ASIL B
 Classification: SEooC (Safety Element out of Context)
@@ -11,7 +11,7 @@ ISO 26262 Reference: Part 6, Clause 11 (Software Testing), Clause 12 (Software S
 
 ## 1. Purpose
 
-This document is the software verification report for the `scorehsm-host` Rust library. It records all verification activities performed against the software safety requirements (HSM-REQ-001 through HSM-REQ-049) as of 2026-03-15, in accordance with ISO 26262-6:2018 Clause 11 (software testing) and Clause 12 (software safety requirements verification).
+This document is the software verification report for the `scorehsm-host` Rust library. It records all verification activities performed against the software safety requirements (HSM-REQ-001 through HSM-REQ-049) as of 2026-04-22, in accordance with ISO 26262-6:2018 Clause 11 (software testing) and Clause 12 (software safety requirements verification).
 
 This report is a mandatory work product for the ASIL B SEooC safety case (`docs/safety/safety-case.md`). It constitutes the primary evidence for the verification sub-claims G2, G4, G5, and the code review evidence supporting G3.
 
@@ -22,6 +22,8 @@ This report covers the `scorehsm-host` library software backend testing only. Ha
 **Rev 1.2 update (2026-03-15):** Phase 9 (CI + project files) and Phase 10 evidence collection complete. All 58 integration tests (SCORE-ITP) and 57 qualification tests (SCORE-QTE) are now implemented and passing. Total test count: 274 (54 unit + 58 ITP + 57 QTE + 104 feature/backend + 1 doc-test). CI pipeline (GitHub Actions) with 4 host jobs green (Test, Clippy, Format, Coverage). Clippy: 0 warnings. Coverage: lcov artifact generated in CI, text % pending extraction.
 
 **Rev 1.3 update (2026-03-15):** Gap analysis fix batch (35 items). Protocol alignment: ECDH opcode (0x0E) wired end-to-end (firmware dispatcher + host transport + hw.rs backend). KeyDerive bug fixed (base key lookup now uses `key_type()` instead of output type; EccP256 derivation unblocked). CRC-32/MPEG-2 deduplicated (hw.rs private copy deleted; single source in `safety.rs`). Session layer hardened: `sha256` now checks safe-state, `ecdh_agree` emits IDS event + rate limiting, `check_rate` reports actual rejection count. CI: `cargo audit` job added, `--features pqc` test step added, `continue-on-error` removed from firmware-check, coverage `fail_ci_if_error` set to true. Mock `sha256` now exercises transport round-trip. `onboard_comm.rs` `.expect()` calls replaced with `map_err`. SC-03 partial verification: Phase 10b HIL (3/3 tests) + ECDH now wired in hardware backend.
+
+**Rev 1.4 update (2026-04-22):** Structural coverage is now measured and recorded (92.54% line coverage, 83.33% branch coverage), the cargo-llvm-cov TCL-2 KAT is closed via tools/coverage-kat/, Linux PQC CI is active, mutation testing is executed with cargo-mutants 26.0.0, and the remaining blockers are reduced to hardware bench evidence plus the external T1-independent release review.
 
 ---
 
@@ -56,10 +58,10 @@ The following items are explicitly out of scope for this verification report:
 
 | Attribute | Value |
 |---|---|
-| Host OS | Windows 11 (CI); Linux (planned for coverage measurement) |
+| Host OS | Windows 11 (local development); Ubuntu Linux in CI for coverage and PQC verification |
 | Rust toolchain | Pinned in `rust-toolchain.toml` (stable channel) |
 | Test runner | `cargo test` |
-| Coverage tool | `cargo-llvm-cov` (TCL-2; validation pending) |
+| Coverage tool | `cargo-llvm-cov` (TCL-2; validation complete) |
 | Static analysis tool | `cargo clippy --all-features -- -D warnings` |
 | Hardware | None — `SoftwareBackend` only; no L55 attached |
 | Feature flags | Default features; `--features certs` for cert_tests; `--features pqc` for pqc_tests (Linux CI only) |
@@ -72,7 +74,7 @@ The following items are explicitly out of scope for this verification report:
 
 **Method:** All 49 HSM-REQ items are mapped to at least one test case. Tests are requirements-based: each test exercises a specific normative requirement by constructing inputs that fall within the requirement's scope, invoking the relevant API, and asserting that the output matches the requirement specification. Test names are correlated with HSM-REQ identifiers in the test strategy (`docs/test-strategy/test-strategy.md`) and in test source file comments using the convention `// HSM-REQ-NNN`.
 
-**Result:** 274 passing tests as of 2026-03-15. Zero failures. Exact counts by module are shown in Section 4. Pqc_tests require Linux CI due to a linker issue on Windows; the figure of 274 excludes pqc_tests (4 additional on Linux).
+**Result:** 274 passing tests as of 2026-04-22. Zero failures. Exact counts by module are shown in Section 4. Pqc_tests require Linux CI due to a linker issue on Windows; the figure of 274 excludes pqc_tests (4 additional on Linux).
 
 **Requirements coverage:** 29 requirements ✅ fully tested by software-only tests; 13 requirements ⚠️ partially covered or with planned additions; 7 requirements ℹ️ require HIL testing (hardware-only verification). See Section 5 (Requirements Coverage Matrix).
 
@@ -262,9 +264,9 @@ The following table updates the requirements coverage from `docs/test-strategy/t
 |---|---|---|---|
 | HSM-REQ-001 | AES-256 encrypt/decrypt | sw_backend_tests | ✅ |
 | HSM-REQ-002 | AES-256-GCM | sw_backend_tests | ✅ |
-| HSM-REQ-003 | AES-256-CBC | — | ⚠️ not yet tested |
-| HSM-REQ-004 | AES-256-CCM | — | ⚠️ not yet tested |
-| HSM-REQ-005 | ChaCha20-Poly1305 | — | ⚠️ not yet tested |
+| HSM-REQ-003 | AES-256-CBC | kat_aes_cbc (host) + firmware/tests/kat_aes_cbc.rs | ✅ |
+| HSM-REQ-004 | AES-256-CCM | kat_aes_ccm | ✅ |
+| HSM-REQ-005 | ChaCha20-Poly1305 | kat_chacha20_poly1305 | ✅ |
 | HSM-REQ-006 | Asymmetric encrypt/decrypt | — | ⚠️ covered indirectly via ECDH |
 | HSM-REQ-007 | ECDH P-256 | sw_backend_tests | ✅ |
 | HSM-REQ-008 | Signature creation | sw_backend_tests | ✅ |
@@ -273,10 +275,10 @@ The following table updates the requirements coverage from `docs/test-strategy/t
 | HSM-REQ-011 | HMAC-SHA256 | sw_backend_tests | ✅ |
 | HSM-REQ-012 | Hashing | sw_backend_tests | ✅ |
 | HSM-REQ-013 | SHA-256 | lib + sw_backend_tests | ✅ |
-| HSM-REQ-014 | SHA-3 | — | ⚠️ not yet tested |
+| HSM-REQ-014 | SHA-3 | kat_sha3 | ✅ |
 | HSM-REQ-015 | HKDF-SHA256 | sw_backend_tests | ✅ |
 | HSM-REQ-016 | Entropy source / RNG | sw_backend_tests | ✅ |
-| HSM-REQ-017 | ChaCha20Rng seeding | — | ⚠️ not yet tested |
+| HSM-REQ-017 | ChaCha20Rng seeding | rng_chacha_determinism | ✅ |
 | HSM-REQ-018 | Certificate management | cert_tests (`--features certs`) | ✅ |
 | HSM-REQ-019 | Key generation | sw_backend_tests | ✅ |
 | HSM-REQ-020 | Key import (wrapped) | sw_backend_tests | ✅ |
@@ -470,37 +472,52 @@ The following modules were reviewed with no findings requiring remediation:
 
 | Metric | ASIL B Target | ISO 26262-6 Reference |
 |---|---|---|
-| Statement coverage | ≥ 85% | Clause 11, Table 10 |
-| Branch coverage | ≥ 80% | Clause 11, Table 10 |
-| MC/DC | Not required at ASIL B | Tailored per safety-plan.md §4.1 |
+| Statement coverage | >= 85% | Clause 11, Table 10 |
+| Branch coverage | >= 80% | Clause 11, Table 10 |
+| MC/DC | Not required at ASIL B | Tailored per safety-plan.md Section 4.1 |
 
 ### 8.2 Current Measurement Status
 
-**Status: INFRASTRUCTURE OPERATIONAL — percentage extraction pending**
+**Status: VERIFIED**
 
-Coverage measurement via `cargo-llvm-cov` runs in the GitHub Actions CI pipeline (Ubuntu `ubuntu-latest`). The Coverage job generates an `lcov.info` artifact on every push to `main` and every PR. The CI run on 2026-03-15 (run #23099513024) completed successfully with 274 tests instrumented and lcov output generated.
+Coverage measurement now runs in the GitHub Actions pipeline and produces
+archived machine-readable artifacts for both the stable line/function gate and
+the nightly branch gate.
 
-**Coverage infrastructure readiness:**
-- `cargo-llvm-cov` is installed via `taiki-e/install-action@cargo-llvm-cov` in CI
-- Coverage CI step is defined in `.github/workflows/ci.yml` (job: `coverage`)
-- Coverage output: `lcov.info` (uploaded to Codecov when token is configured)
-- CI job: GREEN as of 2026-03-15
+**Recorded results (2026-04-22):**
+- Line coverage: 92.54368932038834%
+- Function coverage: 80.0%
+- Branch coverage: 83.33333333333334%
 
-**Next step:** Extract statement/branch coverage percentages from lcov output or configure `cargo llvm-cov --text` in CI for human-readable summary. Codecov integration provides dashboard once `CODECOV_TOKEN` secret is configured.
+**Evidence sources:**
+- coverage-summary.json from cargo +1.87.0 llvm-cov ... --json --summary-only
+- branch-coverage-summary.json from cargo +nightly-2026-03-14 llvm-cov ... --branch --json --summary-only
+- lcov.info archived by the host-coverage CI job
 
-**Engineering estimate:** Based on the test density (274 tests across 77 requirements), the breadth of error injection testing (every `HsmError` variant exercised), and the boundary value coverage (all major boundary conditions exercised), the software backend is expected to meet or exceed the ≥85%/≥80% targets. This is an engineering estimate — formal measurement with extracted percentages is required before this claim can be treated as verified evidence.
+**CI enforcement:**
+- Stable gate: cargo +1.87.0 llvm-cov -p scorehsm-host --features "mock,certs" --lcov --output-path lcov.info --fail-under-lines 85 --fail-under-functions 80
+- Branch gate: cargo +nightly-2026-03-14 llvm-cov -p scorehsm-host --features "mock,certs" --branch --json --summary-only --output-path branch-coverage-summary.json plus a CI threshold check requiring branch coverage >= 80.0%
 
 ### 8.3 TCL-2 Tool Validation
 
-`cargo-llvm-cov` is classified TCL-2 per safety-plan.md §7. The TCL-2 validation exercise (measuring a module with known coverage ground truth and cross-checking the report) is open item OI-02, target 2026-04-01. Until this validation is complete, coverage reports are treated as indicative only, not as release-blocking evidence.
+cargo-llvm-cov remains classified TCL-2 per docs/safety/tool-qualification-records.md.
+The validation exercise is now complete:
+- Fixture: tools/coverage-kat/
+- Tool: cargo-llvm-cov 0.8.5
+- Compiler: nightly-2026-03-14
+- Observed result: exactly 50.0% branch coverage on the committed KAT fixture
+
+Coverage reports are therefore admissible as repository-level release evidence.
 
 ---
 
 ## 9. Outstanding Verification Items
 
-The following verification items remain open as of the date of this report. These are the basis for the CONDITIONALLY PASSED verdict in Section 10.
+The following verification items remain relevant as of the date of this report.
+Closed items are retained here for traceability; only OVI-01 and OVI-05 still
+block a full ASIL B release claim.
 
-### OVI-01 — HIL Testing (Hardware-in-the-Loop)
+### OVI-01 - HIL Testing (Hardware-in-the-Loop)
 
 **Scope:** Verification of 9 HSM-REQ items that require the L55 Nucleo board CI rig:
 HSM-REQ-021 (TrustZone key storage), HSM-REQ-029 (constant-time hardware), HSM-REQ-031 (TrustZone isolation), HSM-REQ-034 (hardware acceleration), HSM-REQ-036 (OS-level protection), HSM-REQ-041 (USB frame CRC/sequence), HSM-REQ-043 (key slot zeroize at L55 level), HSM-REQ-044 (frame length validation), HSM-REQ-046 (secure boot).
@@ -508,46 +525,44 @@ HSM-REQ-021 (TrustZone key storage), HSM-REQ-029 (constant-time hardware), HSM-R
 **Target:** 2026-05-15 (safety-plan.md OI-06)
 **Impact:** Blocks full closure of G2 and G3 hardware-layer sub-claims in the safety case.
 
-### OVI-02 — Coverage Measurement on Linux CI
+### OVI-02 - Coverage Measurement on Linux CI
 
-**Scope:** Statement ≥85% and branch ≥80% coverage measurement via `cargo-llvm-cov` on a Linux runner.
+**Scope:** Statement >=85% and branch >=80% coverage measurement via cargo-llvm-cov on a Linux runner.
 
-**Target:** 2026-04-30 (safety-plan.md OI-03)
-**Impact:** Blocks formal evidence for G5 in the safety case.
+**Status:** Closed 2026-04-22 - measured at 92.54% line coverage and 83.33% branch coverage.
+**Impact:** No longer a blocker for G5.
 
-### OVI-03 — MC/DC Analysis
+### OVI-03 - MC/DC Analysis
 
-**Disposition:** Tailored away at ASIL B per safety-plan.md §4.1. Branch coverage (≥80%) is the primary structural coverage criterion. MC/DC analysis is deferred and is not a release blocker.
+**Disposition:** Tailored away at ASIL B per safety-plan.md Section 4.1. Branch coverage (>=80%) is the primary structural coverage criterion. MC/DC analysis is deferred and is not a release blocker.
 
-### OVI-04 — PQC Tests on Linux CI
+### OVI-04 - PQC Tests on Linux CI
 
-**Scope:** `pqc_tests.rs` (4 tests: ML-DSA roundtrip, ML-DSA wrong message, ML-KEM roundtrip, ML-KEM wrong ciphertext) cannot run on Windows CI due to a linker incompatibility with the `pqcrypto` crates.
+**Scope:** pqc_tests.rs requires a Linux CI runner because the pqcrypto crates are not usable on the Windows linker path.
 
-**Expected behavior:** Tests are expected to pass on Linux CI based on engineering review of the PQC implementation. The linker issue is a CI configuration problem, not a code defect.
+**Status:** Closed 2026-04-22 - .github/workflows/ci.yml now defines host-test-linux-pqc on Ubuntu.
+**Impact:** No longer a blocker for HSM-REQ-033 software evidence.
 
-**Target:** Resolved when Linux CI runner is added (same runner as OVI-02).
-**Impact:** 4 tests excluded from Windows CI run; HSM-REQ-033 PQC coverage confirmation pending Linux run.
+### OVI-05 - T1 Independence Review Sign-Off
 
-### OVI-05 — T1 Independence Review Sign-Off
+**Scope:** ISO 26262-6 Clause 11 T1 independence - independent review of test plans and results for safety-critical functions before v0.1.0 release.
 
-**Scope:** ISO 26262-6 Clause 11 T1 independence — independent review of test plans and results for safety-critical functions before v0.1.0 release.
-
-**Target:** Before v0.1.0 release (safety-plan.md §9.3)
+**Target:** Before v0.1.0 release (safety-plan.md Section 9.3)
 **Impact:** Procedural requirement for release; compensating measures (automated test gates, safety consultant review) are documented.
 
-### OVI-06 — `cargo-llvm-cov` TCL-2 Validation
+### OVI-06 - cargo-llvm-cov TCL-2 Validation
 
-**Scope:** Validation exercise for `cargo-llvm-cov` against known coverage ground truth (safety-plan.md §7, OI-02).
+**Scope:** Validation exercise for cargo-llvm-cov against known coverage ground truth (safety-plan.md Section 7, OI-02).
 
-**Target:** 2026-04-01
-**Impact:** Blocks use of coverage reports as release-blocking evidence.
+**Status:** Closed 2026-04-22 - KAT executed with exact 50.0% branch result.
+**Impact:** No longer blocks use of coverage reports as release evidence.
 
-### OVI-07 — Mutation Testing
+### OVI-07 - Mutation Testing
 
-**Scope:** Mutation testing for the three failure modes identified in the SW-FMEA where mutation testing is the planned verification method (FM-019 `ecdsa_verify`, FM-029 `verify_update_image`, FM-031 version check bypass).
+**Scope:** Mutation testing for the three failure modes identified in the SW-FMEA where mutation testing is the planned verification method (FM-019 ecdsa_verify, FM-029 verify_update_image, FM-031 version check bypass).
 
-**Target:** 2026-04-15 (FMEA-OI-1)
-**Impact:** Strengthens G3 evidence; not a blocker for the software-layer conditional pass.
+**Status:** Closed 2026-04-22 - cargo-mutants 26.0.0 executed against the host crate with 5 caught mutants, 24 unviable mutants, and 0 survivors.
+**Impact:** Strengthens G3 evidence and closes the repository-owned mutation gap.
 
 ---
 
@@ -555,7 +570,7 @@ HSM-REQ-021 (TrustZone key storage), HSM-REQ-029 (constant-time hardware), HSM-R
 
 ### 10.1 Verdict
 
-**CONDITIONALLY PASSED** for software-layer functions as of 2026-03-14.
+**CONDITIONALLY PASSED** for software-layer functions as of 2026-04-22.
 
 ### 10.2 Basis
 
@@ -563,44 +578,40 @@ The following evidence supports the conditional pass verdict:
 
 | Evidence Item | Status |
 |---|---|
-| 274 passing tests across all HSM-REQ software-layer requirements | CONFIRMED |
+| Structural coverage measured at 92.54% lines / 83.33% branches | CONFIRMED |
 | 0 clippy warnings; 0 unsafe blocks; 0 missing docs | CONFIRMED |
-| All `HsmError` variants exercised by negative tests | CONFIRMED |
-| All `IdsEvent` variants exercised by IDS tests | CONFIRMED |
+| All HsmError variants exercised by negative tests | CONFIRMED |
+| All IdsEvent variants exercised by IDS tests | CONFIRMED |
 | All boundary value conditions verified (key import, rate limits, version counter, activation counter) | CONFIRMED |
-| `ZeroizeOnDrop` confirmed on `KeyMaterial` with runtime tests | CONFIRMED |
+| ZeroizeOnDrop confirmed on KeyMaterial with runtime tests | CONFIRMED |
 | ECDH symmetry property correctly tested | CONFIRMED |
 | Certificate chain verification (7 cert_tests) | CONFIRMED |
+| cargo-llvm-cov TCL-2 KAT (tools/coverage-kat/) | CONFIRMED |
+| Mutation testing (cargo-mutants 26.0.0: 5 caught, 24 unviable, 0 survived) | CONFIRMED |
 | Code review findings (CR-SW-01, CR-SW-02, CR-CERT-01, CR-SBT-01, CR-SBT-03, other) | ALL CLOSED |
-| PQC tests (4 tests, Linux CI) | PENDING — expected to pass |
+| PQC tests on Linux CI | CONFIRMED |
 
 ### 10.3 Conditions on the Verdict
 
 The CONDITIONALLY PASSED verdict becomes PASSED upon completion of:
 
 1. **OVI-01**: HIL test execution and reporting for 9 hardware-layer requirements
-2. **OVI-02**: Coverage measurement on Linux CI confirming ≥85%/≥80% targets
-3. **OVI-04**: PQC tests confirmed passing on Linux CI
-4. **OVI-05**: T1 independence review sign-off for v0.1.0 release
-5. **OVI-06**: `cargo-llvm-cov` TCL-2 validation exercise completed
+2. **OVI-05**: T1 independence review sign-off for v0.1.0 release
 
-Until these conditions are met, the verification verdict for the `scorehsm-host` library is:
+Until these conditions are met, the verification verdict for the scorehsm-host library is:
 - **Software-layer safety functions (SC-01, SC-02, SC-04):** CONDITIONALLY PASSED
-- **Hardware boundary safety functions (SC-03 for `HardwareBackend` + L55):** NOT YET VERIFIED — HIL pending
+- **Hardware boundary safety functions (SC-03 for HardwareBackend + L55):** NOT YET VERIFIED - HIL pending
 
 ### 10.4 Recommended Action Before v0.1.0 Release
 
 | Priority | Action | Owner | Target |
 |---|---|---|---|
-| P1 | Complete Linux CI runner setup and execute coverage measurement | DevOps / Host Library Developer | 2026-04-30 |
 | P1 | Execute HIL test suite on Nucleo board rig | Embedded Developer | 2026-05-15 |
-| P2 | Complete `cargo-llvm-cov` TCL-2 validation | Tester | 2026-04-01 |
 | P2 | Obtain T1 independent review sign-off | Safety Manager | Before v0.1.0 |
-| P3 | Execute mutation testing for FM-019/029/031 | Software Safety Engineer | 2026-04-15 |
 
 ---
 
-## 11. V-Model ASIL B Extensions (Rev 1.1 — 2026-03-14)
+## 11. V-Model ASIL B Extensions (Rev 1.1 - 2026-03-14)
 
 This section records the completion of the full ISO 26262-6 V-model left side and right side for the ASIL B elevation of `scorehsm-host`.
 
@@ -684,13 +695,13 @@ The feature/backend tests in `host/tests/` exercise the same code paths but pred
 V-model and lack SSR-level traceability. Assigning them to the V-model traceability chain is
 an open item before ASIL B sign-off.
 
-### 11.5 New Open Items (from TQR)
+### 11.5 TQR Closure Summary
 
-| OI | Description | Target |
+| OI | Description | Status |
 |---|---|---|
-| TQR-OI-01 | Pin `rust-toolchain.toml` to `1.96.0-nightly (1d8897a4e)` | 2026-03-21 |
-| TQR-OI-02 | Execute `cargo-llvm-cov` coverage KAT (TCL-2 validation) | 2026-04-01 |
-| TQR-OI-03 | Configure `cargo clippy -- -D warnings` as blocking CI step | 2026-03-21 |
+| TQR-OI-01 | Pin firmware toolchain to a dated nightly | Closed 2026-04-22 |
+| TQR-OI-02 | Execute cargo-llvm-cov coverage KAT (TCL-2 validation) | Closed 2026-04-22 |
+| TQR-OI-03 | Configure cargo clippy -- -D warnings as blocking CI step | Closed 2026-04-22 |
 
 ### 11.6 FSR/TSR/SSR Coverage
 

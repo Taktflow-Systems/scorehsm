@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-FileCopyrightText: 2026 Taktflow Systems */
+
 /* STM32L552ZE — Secure world partition (TrustZone enabled, TZEN=1)
  *
  * Single S-world image: entire firmware runs in Secure mode.

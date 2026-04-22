@@ -10,11 +10,15 @@
 //! Key material never leaves the HSM. All operations use opaque key handles.
 
 #![deny(missing_docs)]
-#![deny(unsafe_code)]
+#![cfg_attr(not(feature = "ffi"), deny(unsafe_code))]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod backend;
 pub mod error;
 pub mod types;
+
+#[cfg(feature = "ffi")]
+pub mod ffi;
 
 pub mod ids;
 pub mod safety;

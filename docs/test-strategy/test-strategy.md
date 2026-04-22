@@ -234,9 +234,9 @@ Run on: every `cargo test`
 |---|---|---|---|
 | HSM-REQ-001 AES-256 | 2 | sw_backend_tests | ✅ |
 | HSM-REQ-002 AES-GCM | 2 | sw_backend_tests | ✅ |
-| HSM-REQ-003 AES-CBC | — | — | ⚠️ not yet tested |
-| HSM-REQ-004 AES-CCM | — | — | ⚠️ not yet tested |
-| HSM-REQ-005 ChaCha20 | — | — | ⚠️ not yet tested |
+| HSM-REQ-003 AES-CBC | 2 + firmware KAT | `kat_aes_cbc` + `firmware/tests/kat_aes_cbc.rs` | ✅ |
+| HSM-REQ-004 AES-CCM | 2 | `kat_aes_ccm` | ✅ |
+| HSM-REQ-005 ChaCha20 | 2 | `kat_chacha20_poly1305` | ✅ |
 | HSM-REQ-006 Asym enc | — | — | ⚠️ (via ECDH/ECDSA) |
 | HSM-REQ-007 ECDH | 2 | sw_backend_tests | ✅ — end-to-end backend symmetry test via key_import |
 | HSM-REQ-008 Sig create | 2 | sw_backend_tests | ✅ |
@@ -245,10 +245,10 @@ Run on: every `cargo test`
 | HSM-REQ-011 HMAC-SHA256 | 2 | sw_backend_tests | ✅ |
 | HSM-REQ-012 Hashing | 2 | sw_backend_tests | ✅ |
 | HSM-REQ-013 SHA-256 | 1+2 | lib + sw_backend | ✅ |
-| HSM-REQ-014 SHA-3 | — | — | ⚠️ not yet tested |
+| HSM-REQ-014 SHA-3 | 2 | `kat_sha3` | ✅ |
 | HSM-REQ-015 HKDF | 2 | sw_backend_tests | ✅ |
 | HSM-REQ-016 RNG | 2 | sw_backend_tests | ✅ |
-| HSM-REQ-017 ChaCha20Rng | — | — | ⚠️ not yet tested |
+| HSM-REQ-017 ChaCha20Rng | 2 | `rng_chacha_determinism` | ✅ |
 | HSM-REQ-018 Cert mgmt | 7 | cert_tests (--features certs) | ✅ |
 | HSM-REQ-019 Key generation | 2 | sw_backend_tests | ✅ |
 | HSM-REQ-020 Key import | 2 | sw_backend_tests | ✅ — 5 tests: AES/HMAC/ECC usable, wrong length rejected, invalid P-256 scalar rejected |

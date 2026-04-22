@@ -1,6 +1,6 @@
 # scorehsm — Qualification Test Evidence
 
-Date: 2026-03-14
+Date: 2026-04-22
 Standard: ISO 26262-6:2018 §10 / §11
 Status: RELEASED
 ASIL Target: ASIL B
@@ -273,8 +273,27 @@ Evidence for ISO 26262-6 §11 sign-off must include:
 6. **Static analysis report** — `cargo clippy -- -D warnings` (zero warnings)
 7. **MISRA/coding guidelines audit** — per SCORE-TQR (Step 13)
 
-Items 2–7 are open items to be closed before final ASIL B sign-off.
+Repository-owned evidence for coverage, static analysis, and tool validation is now in place. Remaining item-level sign-off still depends on the hardware HIL record and the external release-review process.
 
+## 7. cargo-llvm-cov TCL-2 Validation Evidence
+
+This section records the repository-level tool-validation evidence for
+cargo-llvm-cov, as required by SCORE-TQR T3 and the gap-closure plan C12.
+
+| Field | Value |
+|---|---|
+| Fixture | tools/coverage-kat/ |
+| Tool version | cargo-llvm-cov 0.8.5 |
+| Compiler | rustc 1.96.0-nightly (1d8897a4e 2026-03-13) via nightly-2026-03-14 |
+| Command | cargo +nightly-2026-03-14 llvm-cov --manifest-path tools/coverage-kat/Cargo.toml --branch --json --summary-only --output-path .tmp/coverage-kat-summary.json |
+| Expected result | Exactly 50.0% branch coverage on the committed fixture |
+| Observed result | 50.0% branch coverage (3/6 LLVM-instrumented branches covered), 72.22% line coverage |
+| Disposition | Pass |
+
+Interpretation:
+- The committed KAT fixture is intentionally partial and stable.
+- cargo-llvm-cov reported the expected branch result exactly.
+- The tool-validation objective for repository-level coverage evidence is satisfied.
 ---
 
-*Document end — SCORE-QTE rev 1.0 — 2026-03-14*
+*Document end — SCORE-QTE rev 1.1 — 2026-04-22*

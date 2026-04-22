@@ -1,16 +1,18 @@
 # SCORE Security Crypto Contribution Plan
 
 Date: 2026-03-14
-Status: DRAFT
+Status: RETIRED (historical reference as of 2026-04-22)
 Author: Taktflow Systems
 Target: Eclipse SCORE `baselibs/score/crypto/` component
 License: Apache-2.0 (SPDX: Apache-2.0)
+
+Historical note (2026-04-22): Eclipse SCORE upstream contribution is no longer an active delivery objective for this repository. This file is retained as interface and packaging reference only.
 
 ---
 
 ## 1. Ground Truth — What Exists in the SCORE Repo
 
-Cloned at: `C:\Users\andao\AppData\Local\Temp\eclipse-contrib\baselibs\`
+Cloned at: `<temp-workspace>/baselibs/`
 
 ```
 score/crypto/
@@ -44,10 +46,10 @@ exactly these types — no divergence.
 | `HSM_ERR_CRYPTO_FAIL` | −4 | `CryptoFail`, `HardwareFault` |
 | `HSM_ERR_NOT_INITIALIZED` | −5 | `NotInitialized` |
 | `HSM_ERR_TAG_MISMATCH` | −6 | `TagMismatch`, `AuthenticationFailed` |
-| `HSM_ERR_BUFFER_TOO_SMALL` | −7 | *(new — no equivalent yet in HsmError)* |
+| `HSM_ERR_BUFFER_TOO_SMALL` | −7 | `BufferTooSmall { required, provided }` |
 | `HSM_ERR_UNSUPPORTED` | −8 | `Unsupported` |
 
-**Gap:** `HSM_ERR_BUFFER_TOO_SMALL` has no Rust counterpart. Add to `HsmError` before FFI work.
+**Status:** closed in `scorehsm` on 2026-04-22 — `HsmError::BufferTooSmall` now exists; FFI status mapping still needs to be implemented during `ffi.rs` work.
 
 **Safety-specific error codes to propose adding to `hsm_types.h`:**
 
@@ -600,16 +602,15 @@ These must be done in the scorehsm repo first:
 
 | Item | Status | Target |
 |---|---|---|
-| Add `LICENSE` (Apache-2.0) to scorehsm repo | OPEN | Before PR 1 |
-| Add `NOTICE` file | OPEN | Before PR 1 |
-| Add `BufferTooSmall` to `HsmError` | OPEN | Before `ffi.rs` work |
-| Implement `ffi.rs` skeleton (compiles, all fns return `HSM_ERR_NOT_INITIALIZED`) | OPEN | Before PR 3 |
-| Close TQR-OI-01 (pin toolchain) | OPEN | 2026-03-21 |
-| Close TQR-OI-03 (clippy CI) | OPEN | 2026-03-21 |
-| Close UC-02 (coverage ≥85%) | OPEN | 2026-04-30 |
-| Close UC-01 (HIL tests) | OPEN | 2026-05-15 |
-| `cargo test --lib --features sw-backend,mock,certs` — all green | ✓ Done | 2026-03-14 |
-
+| Add LICENSE (Apache-2.0) to scorehsm repo | Done | Before PR 1 |
+| Add NOTICE file | Done | Before PR 1 |
+| Add BufferTooSmall to HsmError | Done | Before ffi.rs work |
+| Implement ffi.rs skeleton (compiles, all fns return HSM_ERR_NOT_INITIALIZED) | Done (superseded by full FFI wiring) | Before PR 3 |
+| Close TQR-OI-01 (pin toolchain) | Done | 2026-03-21 |
+| Close TQR-OI-03 (clippy CI) | Done | 2026-03-21 |
+| Close UC-02 (coverage >=85%) | Done | 2026-04-30 |
+| Close UC-01 (HIL tests) | Deferred - hardware bench evidence still required | 2026-05-15 |
+| cargo test --lib --features sw-backend,mock,certs - all green | Done | 2026-03-14 |
 ---
 
 ## 12. Open Questions for SCORE Safety WG

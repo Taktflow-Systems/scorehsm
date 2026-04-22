@@ -31,7 +31,7 @@ use crate::{
     error::{HsmError, HsmResult},
     ids::{IdsEvent, IdsHook, NullIds},
     safety::{Clock, KeyStoreChecksum, LibraryState, SystemClock, TokenBucketRateLimiter},
-    types::{AesGcmParams, EcdsaSignature, KeyHandle, KeyType},
+    types::{AesGcmParams, BootStatus, EcdsaSignature, KeyHandle, KeyType},
 };
 
 // ── Rate limit configuration (legacy types — preserved for backward compat) ──
@@ -99,10 +99,15 @@ pub struct HsmSession {
 impl HsmSession {
     /// Create a session wrapping `backend`.
     pub fn new<B: HsmBackend + 'static>(backend: B) -> Self {
+        Self::from_boxed(Box::new(backend))
+    }
+
+    /// Create a session from an already boxed backend.
+    pub fn from_boxed(backend: Box<dyn HsmBackend>) -> Self {
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         let rate = Arc::new(TokenBucketRateLimiter::with_defaults(clock.clone()));
         Self {
-            backend: Box::new(backend),
+            backend,
             owned_handles: HashSet::new(),
             ids: Box::new(NullIds),
             rate,
@@ -195,6 +200,24 @@ impl HsmSession {
         self.checksum.update(&self.owned_handles);
         self.library_state.transition_to_uninitialized();
         self.backend.deinit()
+    }
+
+    /// Recover from safe state by fully reinitializing the backend and session state.
+    pub fn reinit(&mut self) -> HsmResult<()> {
+        self.library_state.reinit()?;
+        self.owned_handles.clear();
+        self.checksum.update(&self.owned_handles);
+        self.fail_count = 0;
+        self.rate_reject_count = 0;
+        self.backend.deinit()?;
+        self.backend.init()?;
+        self.library_state.transition_to_operating()
+    }
+
+    /// Query secure boot verification state from the active backend.
+    pub fn boot_status(&self) -> HsmResult<BootStatus> {
+        self.library_state.check_not_safe()?;
+        self.backend.boot_status()
     }
 
     /// Generate a key. The returned handle is owned by this session.
@@ -303,6 +326,102 @@ impl HsmSession {
         }
     }
 
+    /// AES-256-CBC encrypt.
+    pub fn aes_cbc_encrypt(
+        &mut self,
+        handle: KeyHandle,
+        iv: &[u8; 16],
+        plaintext: &[u8],
+    ) -> HsmResult<Vec<u8>> {
+        self.library_state.check_not_safe()?;
+        self.assert_owned(handle)?;
+        self.backend.aes_cbc_encrypt(handle, iv, plaintext)
+    }
+
+    /// AES-256-CBC decrypt.
+    pub fn aes_cbc_decrypt(
+        &mut self,
+        handle: KeyHandle,
+        iv: &[u8; 16],
+        ciphertext: &[u8],
+    ) -> HsmResult<Vec<u8>> {
+        self.library_state.check_not_safe()?;
+        self.assert_owned(handle)?;
+        self.check_rate("decrypt")?;
+        self.backend.aes_cbc_decrypt(handle, iv, ciphertext)
+    }
+
+    /// AES-256-CCM encrypt. Returns `ciphertext || tag`.
+    pub fn aes_ccm_encrypt(
+        &mut self,
+        handle: KeyHandle,
+        nonce: &[u8],
+        aad: &[u8],
+        plaintext: &[u8],
+        tag_len: usize,
+    ) -> HsmResult<Vec<u8>> {
+        self.library_state.check_not_safe()?;
+        self.assert_owned(handle)?;
+        self.backend
+            .aes_ccm_encrypt(handle, nonce, aad, plaintext, tag_len)
+    }
+
+    /// AES-256-CCM decrypt. `ciphertext_and_tag` must end with `tag_len` bytes of tag.
+    pub fn aes_ccm_decrypt(
+        &mut self,
+        handle: KeyHandle,
+        nonce: &[u8],
+        aad: &[u8],
+        ciphertext_and_tag: &[u8],
+        tag_len: usize,
+    ) -> HsmResult<Vec<u8>> {
+        self.library_state.check_not_safe()?;
+        self.assert_owned(handle)?;
+        self.check_rate("decrypt")?;
+        self.backend
+            .aes_ccm_decrypt(handle, nonce, aad, ciphertext_and_tag, tag_len)
+    }
+
+    /// ChaCha20-Poly1305 encrypt.
+    pub fn chacha20_poly1305_encrypt(
+        &mut self,
+        handle: KeyHandle,
+        nonce: &[u8; 12],
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> HsmResult<(Vec<u8>, [u8; 16])> {
+        self.library_state.check_not_safe()?;
+        self.assert_owned(handle)?;
+        self.backend
+            .chacha20_poly1305_encrypt(handle, nonce, aad, plaintext)
+    }
+
+    /// ChaCha20-Poly1305 decrypt.
+    pub fn chacha20_poly1305_decrypt(
+        &mut self,
+        handle: KeyHandle,
+        nonce: &[u8; 12],
+        aad: &[u8],
+        ciphertext: &[u8],
+        tag: &[u8; 16],
+    ) -> HsmResult<Vec<u8>> {
+        self.library_state.check_not_safe()?;
+        self.assert_owned(handle)?;
+        self.check_rate("decrypt")?;
+        match self
+            .backend
+            .chacha20_poly1305_decrypt(handle, nonce, aad, ciphertext, tag)
+        {
+            Ok(pt) => Ok(pt),
+            Err(HsmError::TagMismatch) => {
+                self.record_fail();
+                self.ids.on_event(IdsEvent::DecryptFailed { handle });
+                Err(HsmError::TagMismatch)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// ECDSA sign.
     pub fn ecdsa_sign(
         &mut self,
@@ -340,5 +459,17 @@ impl HsmSession {
         let shared = self.backend.ecdh_agree(handle, peer_pub)?;
         self.ids.on_event(IdsEvent::EcdhAgreed { handle });
         Ok(shared)
+    }
+
+    /// SHA3-256 hash (software backend only).
+    pub fn sha3_256(&self, data: &[u8]) -> HsmResult<[u8; 32]> {
+        self.library_state.check_not_safe()?;
+        self.backend.sha3_256(data)
+    }
+
+    /// SHA3-512 hash (software backend only).
+    pub fn sha3_512(&self, data: &[u8]) -> HsmResult<[u8; 64]> {
+        self.library_state.check_not_safe()?;
+        self.backend.sha3_512(data)
     }
 }

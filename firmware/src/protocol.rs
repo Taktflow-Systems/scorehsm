@@ -10,10 +10,14 @@
 //! MAGIC = 0xAB 0xCD for commands; 0xCD 0xAB would be a corrupted frame.
 //! CRC-32/MPEG-2 over bytes [0 .. 9+LEN-1], poly 0x04C11DB7, init 0xFFFFFFFF.
 
+use crc::{Crc, CRC_32_MPEG_2};
+
 pub const MAGIC: [u8; 2]  = [0xAB, 0xCD];
 pub const MAX_PAYLOAD: usize = 512;
 pub const FRAME_OVERHEAD: usize = 13; // MAGIC(2)+CMD(1)+SEQ(4)+LEN(2)+CRC32(4)
 pub const MAX_FRAME: usize = FRAME_OVERHEAD + MAX_PAYLOAD;
+
+const CRC32_MPEG2: Crc<u32> = Crc::<u32>::new(&CRC_32_MPEG_2);
 
 // ── Opcodes ──────────────────────────────────────────────────────────────────
 
@@ -86,33 +90,24 @@ pub enum Rsp {
 // ── CRC-32/MPEG-2 (TSR-TIG-01, HSM-REQ-050) ────────────────────────────────
 //
 // Parameters: poly=0x04C11DB7, init=0xFFFFFFFF, RefIn=false, RefOut=false,
-// XorOut=0x00000000.  KAT: crc32_mpeg2(&[0x00;4]) == 0x2144_DF1C.
+// XorOut=0x00000000.  KAT: crc32_mpeg2(&[0x00; 4]) == 0xC704_DD7B.
 
 /// CRC-32/MPEG-2: poly=0x04C11DB7, init=0xFFFFFFFF, no reflection.
 pub fn crc32_mpeg2(data: &[u8]) -> u32 {
-    let mut crc: u32 = 0xFFFF_FFFF;
-    for &b in data {
-        crc ^= (b as u32) << 24;
-        for _ in 0..8 {
-            if crc & 0x8000_0000 != 0 {
-                crc = (crc << 1) ^ 0x04C1_1DB7;
-            } else {
-                crc <<= 1;
-            }
-        }
-    }
-    crc
+    CRC32_MPEG2.checksum(data)
 }
 
 // ── Frame ─────────────────────────────────────────────────────────────────────
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Frame<'a> {
     pub cmd: Cmd,
     pub seq: u32,
     pub payload: &'a [u8],
 }
 
-#[derive(Debug, PartialEq, Eq, defmt::Format)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(all(target_arch = "arm", target_os = "none"), derive(defmt::Format))]
 pub enum ParseError {
     TooShort,
     BadMagic,
@@ -199,8 +194,8 @@ mod tests {
 
     #[test]
     fn crc32_mpeg2_known_answer() {
-        // KAT from TSR-TIG-01: CRC-32/MPEG-2 of four zero bytes = 0x2144DF1C
-        assert_eq!(crc32_mpeg2(&[0x00; 4]), 0x2144_DF1C);
+        // KAT from TSR-TIG-01: CRC-32/MPEG-2 of four zero bytes = 0xC704DD7B
+        assert_eq!(crc32_mpeg2(&[0x00; 4]), 0xC704_DD7B);
     }
 
     #[test]

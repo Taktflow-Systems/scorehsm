@@ -16,7 +16,11 @@ use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use crc::{Crc, CRC_32_MPEG_2};
+
 use crate::error::{HsmError, HsmResult};
+
+const CRC32_MPEG2: Crc<u32> = Crc::<u32>::new(&CRC_32_MPEG_2);
 
 // ── Clock trait ──────────────────────────────────────────────────────────────
 
@@ -382,18 +386,7 @@ impl Default for KeyStoreChecksum {
 
 /// CRC-32/MPEG-2: poly=0x04C11DB7, init=0xFFFFFFFF, no reflection.
 pub fn crc32_mpeg2(data: &[u8]) -> u32 {
-    let mut crc: u32 = 0xFFFF_FFFF;
-    for &b in data {
-        crc ^= (b as u32) << 24;
-        for _ in 0..8 {
-            if crc & 0x8000_0000 != 0 {
-                crc = (crc << 1) ^ 0x04C1_1DB7;
-            } else {
-                crc <<= 1;
-            }
-        }
-    }
-    crc
+    CRC32_MPEG2.checksum(data)
 }
 
 // ── Power-On Self-Test (HSM-REQ-074/075) ────────────────────────────────────

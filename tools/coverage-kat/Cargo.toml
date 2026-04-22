@@ -1,0 +1,14 @@
+## SPDX-License-Identifier: Apache-2.0
+## SPDX-FileCopyrightText: 2026 Taktflow Systems
+
+[package]
+name = "coverage-kat"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "coverage_kat"
+path = "src/lib.rs"
+
+[workspace]

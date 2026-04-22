@@ -131,6 +131,16 @@ Any algo not in this table → `Err(UnsupportedAlgorithm)`
 - Rollback on any DB error means the counter is not advanced (safe: skipped value, no reuse)
 - `synchronous=FULL` ensures the increment survives a power loss between commit and AEAD call
 
+### 3.5 Software-only algorithm scope notes
+
+- HSM-REQ-004 (AES-256-CCM) is implemented in the host software backend only. The
+  current STM32L552 USB protocol and firmware runtime expose AES-GCM but do not
+  expose a CCM opcode or claim a hardware CCM execution path in v0.1.0.
+- HSM-REQ-014 (SHA-3) always uses the software implementation, even when
+  `hw-backend` is enabled. The STM32L552 HASH peripheral supports SHA-1 and
+  SHA-2 variants, but not SHA-3, so SHA-3 requests remain on the Rust software
+  path by design.
+
 ---
 
 ## 4. Unit: `RateLimiter` (`safety.rs`)

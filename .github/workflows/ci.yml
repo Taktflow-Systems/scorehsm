@@ -36,9 +36,19 @@ jobs:
       - name: Test (certs)
         run: cargo test --workspace --features certs
 
-      # PQC feature
+  host-test-linux-pqc:
+    name: Test (host, Linux PQC)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+      - uses: dtolnay/rust-toolchain@1.87.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "host"
       - name: Test (pqc)
-        run: cargo test --workspace --features pqc
+        run: cargo test -p scorehsm-host --features pqc
 
   host-clippy:
     name: Clippy (host)
@@ -55,6 +65,40 @@ jobs:
           workspaces: "host"
       - name: Clippy (all features)
         run: cargo clippy --workspace --all-targets --features "mock,certs" -- -D warnings
+
+  host-ffi:
+    name: FFI (host)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev build-essential
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "host"
+      - name: Build staticlib
+        run: cargo build -p scorehsm-host --features ffi
+      - name: FFI smoke test
+        run: cargo test -p scorehsm-host --features ffi --test ffi_smoke
+      - name: FFI clippy
+        run: cargo clippy -p scorehsm-host --features ffi -- -D warnings
+      - name: Header compile (gcc)
+        run: gcc -std=c99 -Wall -Werror -c host/tests/c/ffi_link_test.c -Iinclude -o /tmp/ffi_link_test.o
+      - name: Header compile (clang)
+        run: clang -std=c17 -Wall -Werror -c host/tests/c/ffi_link_test.c -Iinclude -o /tmp/ffi_link_test-clang.o
+      - name: C link test
+        run: make -C host/tests/c
+      - name: Upload FFI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-ffi-artifacts
+          path: |
+            target/debug/libscorehsm_host.a
+            include/score/crypto/hsm.h
+            include/score/crypto/hsm_types.h
 
   host-fmt:
     name: Format (host)
@@ -100,8 +144,8 @@ jobs:
         uses: github/codeql-action/analyze@v3
 
   # ── Coverage ─────────────────────────────────────────────────────────────
-  coverage:
-    name: Coverage
+  host-coverage:
+    name: Coverage (host)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -110,13 +154,41 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.87.0
         with:
           components: llvm-tools-preview
+      - uses: dtolnay/rust-toolchain@nightly-2026-03-14
+        with:
+          components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "host"
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage
-        run: cargo llvm-cov --workspace --features "mock,certs" --lcov --output-path lcov.info
+      - name: Generate line and function coverage
+        run: cargo +1.87.0 llvm-cov -p scorehsm-host --features "mock,certs" --lcov --output-path lcov.info --fail-under-lines 85 --fail-under-functions 80
+      - name: Export coverage summary
+        run: cargo +1.87.0 llvm-cov report --json --summary-only --output-path coverage-summary.json
+      - name: Generate branch coverage summary
+        run: cargo +nightly-2026-03-14 llvm-cov -p scorehsm-host --features "mock,certs" --branch --json --summary-only --output-path branch-coverage-summary.json
+      - name: Enforce branch coverage
+        run: |
+          python3 - <<'PY'
+          import json
+          import sys
+
+          with open("branch-coverage-summary.json", "r", encoding="utf-8") as fh:
+              data = json.load(fh)
+
+          percent = data["data"][0]["totals"]["branches"]["percent"]
+          print(f"Branch coverage: {percent:.2f}%")
+          sys.exit(0 if percent >= 80.0 else 1)
+          PY
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-coverage-artifacts
+          path: |
+            lcov.info
+            coverage-summary.json
+            branch-coverage-summary.json
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -133,10 +205,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@nightly-2026-03-14
         with:
           targets: thumbv8m.main-none-eabihf
           components: clippy
+      - name: Rust version
+        run: rustc --version
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "firmware"

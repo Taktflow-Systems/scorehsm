@@ -75,7 +75,11 @@ cargo clippy --workspace --all-targets --features "mock,certs" -- -D warnings
 
 ## Status
 
-Phases 0–9 complete. Phase 10 evidence collection complete — 274 tests passing, CI green, docs updated. HIL hardware verification (4 tests on Pi + Nucleo) pending.
+Phases 0–9 are complete. Phase 10 is still open: release blockers `RB-01` through
+`RB-05` remain active in [docs/safety/gap-analysis.md](docs/safety/gap-analysis.md),
+covering HIL evidence, coverage enforcement, tool qualification, independence
+review, and mutation testing. The software test suite is passing, but release
+readiness is not yet claimed while those blockers remain open.
 
 ## License
 

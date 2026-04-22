@@ -1,25 +1,34 @@
-# cargo-deny configuration — replaces cargo-audit with full policy checking
+# cargo-deny configuration for scorehsm's supported host targets.
 # https://embarkstudios.github.io/cargo-deny/
 
+[graph]
+all-features = true
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-pc-windows-msvc" },
+]
+
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
-yanked = "warn"
-notice = "warn"
+ignore = []
 
 [licenses]
-unlicensed = "deny"
+confidence-threshold = 0.8
 allow = [
     "Apache-2.0",
     "MIT",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "ISC",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
-    "Zlib",
 ]
-copyleft = "deny"
+exceptions = [
+    # serialport is used only by the optional hardware backend; keep the
+    # exception crate-scoped instead of relaxing MPL-2.0 for the whole repo.
+    { crate = "serialport", allow = ["MPL-2.0"] },
+]
+
+[licenses.private]
+ignore = false
 
 [bans]
 multiple-versions = "warn"
@@ -28,4 +37,8 @@ wildcards = "deny"
 [sources]
 unknown-registry = "deny"
 unknown-git = "allow"  # Embassy pinned to git SHA
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = ["https://github.com/embassy-rs/embassy"]
+
+[sources.allow-org]
+github = ["embassy-rs"]

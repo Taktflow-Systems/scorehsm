@@ -30,6 +30,12 @@ pub enum KeyType {
 pub enum Algorithm {
     /// AES-256-GCM authenticated encryption.
     Aes256Gcm,
+    /// AES-256-CBC encryption.
+    Aes256Cbc,
+    /// AES-256-CCM authenticated encryption.
+    Aes256Ccm,
+    /// ChaCha20-Poly1305 authenticated encryption.
+    ChaCha20Poly1305,
     /// HMAC-SHA256.
     HmacSha256,
     /// ECDSA with P-256.
@@ -38,6 +44,10 @@ pub enum Algorithm {
     EcdhP256,
     /// SHA-256.
     Sha256,
+    /// SHA3-256.
+    Sha3_256,
+    /// SHA3-512.
+    Sha3_512,
     /// HKDF with SHA-256.
     HkdfSha256,
     /// ML-DSA (Dilithium) — software only.

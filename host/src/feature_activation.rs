@@ -122,6 +122,22 @@ pub fn verify_activation_token(
     Ok(())
 }
 
+/// Verify a feature activation token and persist the accepted counter in memory.
+///
+/// This helper models the caller-side counter update step required by FM-034:
+/// the monotonic replay-protection counter only advances after successful
+/// verification, and remains unchanged on failure.
+pub fn verify_activation_token_and_update(
+    token: &ActivationToken<'_>,
+    authority_pk: &[u8; 65],
+    last_counter: &mut u64,
+    ids: &dyn IdsHook,
+) -> HsmResult<()> {
+    verify_activation_token(token, authority_pk, *last_counter, ids)?;
+    *last_counter = token.counter;
+    Ok(())
+}
+
 /// Convenience: `verify_activation_token` with `NullIds`.
 pub fn verify_activation_token_no_ids(
     token: &ActivationToken<'_>,
@@ -129,4 +145,13 @@ pub fn verify_activation_token_no_ids(
     last_counter: u64,
 ) -> HsmResult<()> {
     verify_activation_token(token, authority_pk, last_counter, &NullIds)
+}
+
+/// Convenience: `verify_activation_token_and_update` with `NullIds`.
+pub fn verify_activation_token_and_update_no_ids(
+    token: &ActivationToken<'_>,
+    authority_pk: &[u8; 65],
+    last_counter: &mut u64,
+) -> HsmResult<()> {
+    verify_activation_token_and_update(token, authority_pk, last_counter, &NullIds)
 }

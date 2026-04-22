@@ -1,6 +1,6 @@
 # scorehsm — ISO 26262 Part 6 Software Safety Plan
 
-Date: 2026-03-14
+Date: 2026-04-22
 Status: ACTIVE
 ASIL Target: ASIL B
 Classification: SEooC (Safety Element out of Context)
@@ -125,17 +125,17 @@ The following ISO 26262-6 methods are applied without tailoring at ASIL B:
 | Unit Design (module-level) | Clause 8 | Mandatory | Complete (inline Rust doc — `deny(missing_docs)`) | Source: `host/src/**/*.rs`, `firmware/src/**/*.rs` |
 | Coding Guidelines | Clause 8 | Mandatory | Complete (compiler-enforced) | `deny(unsafe_code)`, `deny(missing_docs)`, `clippy`, `rustfmt.toml` |
 | Unit Tests | Clause 9 | Mandatory | Complete (110 passing tests) | `host/tests/`, `host/src/lib.rs` `#[cfg(test)]` |
-| Software Integration Tests | Clause 10 | Mandatory | Complete (software backend); HIL tests in progress | `host/tests/sw_backend_tests.rs`, HIL test plan |
-| FMEA (SW-FMEA) | Clause 7 / Annex A | Recommended (++) | In progress — USB protocol layer and key management covered | `docs/safety/sw-fmea.md` (target) |
-| Statement Coverage Analysis (≥85%) | Clause 11 | Mandatory | Pending — measurement infrastructure ready (`cargo-llvm-cov`) | CI report: `target/llvm-cov/` |
-| Branch Coverage Analysis (≥80%) | Clause 11 | Mandatory | Pending — measurement infrastructure ready | CI report: `target/llvm-cov/` |
-| Safety Case (GSN/structured argument) | Clause 12 | Mandatory | Planned — architecture in this plan | `docs/safety/safety-case.md` (target) |
+| Software Integration Tests | Clause 10 | Mandatory | Complete (software backend); remaining HIL evidence deferred to dedicated bench work | `host/tests/sw_backend_tests.rs`, HIL test plan |
+| FMEA (SW-FMEA) | Clause 7 / Annex A | Recommended (++) | Complete — USB protocol and key-management sections fully authored | `docs/safety/fmea.md` |
+| Statement Coverage Analysis (≥85%) | Clause 11 | Mandatory | Complete — 92.54% line coverage with CI gate | CI artifact: `coverage-summary.json` |
+| Branch Coverage Analysis (≥80%) | Clause 11 | Mandatory | Complete — 83.33% branch coverage with recorded nightly gate | CI artifact: `branch-coverage-summary.json` |
+| Safety Case (GSN/structured argument) | Clause 12 | Mandatory | Complete — maintained as a live structured argument | `docs/safety/safety-case.md` |
 | Threat Model / TARA | ISO 21434 §15 (interface) | Not mandated by 26262 — included as complementary evidence | Complete | `docs/safety/threat-model.md` |
-| Verification Report | Clause 12 | Mandatory | Planned — generated from CI artifacts per release | `docs/safety/verification-report.md` (target) |
+| Verification Report | Clause 12 | Mandatory | Complete — current revision maintained in repo | `docs/safety/verification-report.md` |
 | Configuration Management Plan | ISO 26262-8 §7 | Mandatory | Complete (git, semver, branch policy) | §11 of this document |
 | Tool Classification Record | ISO 26262-8 §11 | Mandatory | Complete | §7 of this document |
 
-**FMEA note:** SW-FMEA is in progress. Coverage of the USB protocol layer (frame parsing, CRC verification, sequence number enforcement) and key management (slot allocation, handle validation, zeroization) is the first priority, as these contain the highest density of safety-relevant failure modes.
+**FMEA note:** SW-FMEA authoring for the USB protocol layer and key management is complete. Remaining evidence gaps tied to those failure modes are hardware-only items (for example SRAM2 zeroize and TRNG bench validation), not missing documentation.
 
 ---
 
@@ -170,7 +170,7 @@ All tools in the `scorehsm` build and verification chain fall into one of two ca
 | GitHub Actions CI | Pinned action SHAs | TI1 | TD3 | TCL-1 | No | Orchestrates the build and test pipeline. Does not transform source code. CI failures are visible and block merges. The CI configuration itself is version-controlled and peer-reviewed. |
 | `cargo clippy` | Pinned with `rustc` | TI1 | TD3 | TCL-1 | No | Static linter. Lint warnings treated as errors (`-D warnings`). Findings reviewed by developer; does not produce safety output autonomously. |
 
-**TCL-2 validation plan for `cargo-llvm-cov`:** Before the first release, a validation test shall be executed: a module with a known set of covered and uncovered branches shall be measured; the coverage report output shall be manually compared against the known ground truth. The validation test and its results shall be recorded in `docs/safety/tool-validation-llvm-cov.md`.
+**TCL-2 validation plan for `cargo-llvm-cov`:** The validation test is implemented in `tools/coverage-kat/`. Its execution record and observed 50.0% branch result are recorded in `docs/safety/tool-qualification-records.md` T3 and `docs/safety/qualification-test-evidence.md` §7.
 
 ---
 
@@ -221,6 +221,11 @@ Review records are maintained as GitHub pull request review threads, which are p
 | Branch coverage | ≥ 80% | `cargo-llvm-cov` | Every CI run on `main` branch |
 
 Coverage is measured over the `scorehsm-host` library and its integration tests. CI fails if coverage drops below threshold. Coverage reports are archived as CI artifacts for each release tag.
+
+Current measured results (2026-04-22):
+- Line coverage: `92.54%` (`cargo llvm-cov ... --fail-under-lines 85`)
+- Branch coverage: `83.33%` (`cargo +nightly-2026-03-14 llvm-cov --branch ...`)
+- Function coverage gate: `80%`
 
 The `SoftwareBackend` path is the primary coverage target, as it runs in CI without hardware. `HardwareBackend`-specific paths are covered in the HIL test environment and reported separately.
 
@@ -344,10 +349,11 @@ For any change to a safety-critical module (§8.3), the pull request description
 
 | ID | Item | Owner | Target Date | Status |
 |---|---|---|---|---|
-| OI-01 | Complete SW-FMEA for USB protocol layer and key management module | Software Safety Engineer | 2026-04-15 | In progress |
-| OI-02 | Validate `cargo-llvm-cov` against known ground truth (TCL-2 validation, §7) | Tester | 2026-04-01 | Open |
-| OI-03 | Achieve ≥85% statement / ≥80% branch coverage with CI gate enforced | Host Library Developer | 2026-04-30 | In progress — `cargo-llvm-cov` integrated |
-| OI-04 | Author safety case (GSN) in `docs/safety/safety-case.md` | Software Safety Engineer | 2026-05-15 | Open |
-| OI-05 | Produce first verification report for v0.1.0 release | Software Safety Engineer + Tester | 2026-05-30 | Open |
-| OI-06 | HIL test execution and documentation — `HardwareBackend` coverage | Embedded Developer | 2026-05-15 | In progress |
+| OI-01 | Complete SW-FMEA for USB protocol layer and key management module | Software Safety Engineer | 2026-04-15 | Closed 2026-04-22 |
+| OI-02 | Validate `cargo-llvm-cov` against known ground truth (TCL-2 validation, §7) | Tester | 2026-04-01 | Closed 2026-04-22 |
+| OI-03 | Achieve ≥85% statement / ≥80% branch coverage with CI gate enforced | Host Library Developer | 2026-04-30 | Closed 2026-04-22 |
+| OI-04 | Author safety case (GSN) in `docs/safety/safety-case.md` | Software Safety Engineer | 2026-05-15 | Closed 2026-04-22 |
+| OI-05 | Produce first verification report for v0.1.0 release | Software Safety Engineer + Tester | 2026-05-30 | Closed 2026-04-22 |
+| OI-06 | HIL test execution and documentation — `HardwareBackend` coverage | Embedded Developer | 2026-05-15 | Deferred — dedicated bench evidence still required |
+| OI-08 | Obtain T1-independent release sign-off for safety-critical test results | Safety Manager | Before v0.1.0 | Deferred — independent reviewer not assigned in this workspace |
 | OI-07 | Confirm `cargo audit` clean for all v0.1.0 dependencies | Configuration Manager | Per release | Ongoing |

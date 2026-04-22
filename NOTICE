@@ -1,0 +1,122 @@
+SPDX-License-Identifier: Apache-2.0
+SPDX-FileCopyrightText: 2026 Taktflow Systems
+
+scorehsm NOTICE
+===============
+
+scorehsm is distributed under the Apache License 2.0. This NOTICE records the
+non-Apache-only third-party Rust crates present in supported scorehsm host
+builds.
+
+Inventory basis:
+- Derived from `cargo license --json --avoid-dev-deps --all-features`.
+- Target scope: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
+  `x86_64-pc-windows-msvc`.
+- Crates licensed only under Apache-2.0 are omitted because they are already
+  covered by the main project license.
+- Where a crate offers multiple licenses, the full SPDX expression reported by
+  `cargo-license` is shown below.
+
+License expression: (Apache-2.0 OR MIT) AND Unicode-3.0
+- unicode-ident 1.0.24
+
+License expression: Apache-2.0 OR BSD-2-Clause OR MIT
+- zerocopy 0.8.48
+- zerocopy-derive 0.8.48
+
+License expression: Apache-2.0 OR CC0-1.0 OR MIT-0
+- dunce 1.0.5
+
+License expression: Apache-2.0 OR MIT
+- aead 0.5.2
+- aes 0.8.4
+- aes-gcm 0.10.3
+- base16ct 0.2.0
+- base64ct 1.8.3
+- bitflags 1.3.2
+- bitflags 2.11.1
+- block-buffer 0.10.4
+- cc 1.2.60
+- cfg-if 1.0.4
+- chacha20 0.9.1
+- chacha20poly1305 0.10.1
+- cipher 0.4.4
+- const-oid 0.9.6
+- cpufeatures 0.2.17
+- crypto-bigint 0.5.5
+- crypto-common 0.1.7
+- ctr 0.9.2
+- der 0.7.10
+- der_derive 0.7.3
+- digest 0.10.7
+- ecdsa 0.16.9
+- elliptic-curve 0.13.8
+- ff 0.13.1
+- find-msvc-tools 0.1.9
+- getrandom 0.2.17
+- getrandom 0.3.4
+- ghash 0.5.1
+- glob 0.3.3
+- group 0.13.0
+- hkdf 0.12.4
+- hmac 0.12.1
+- inout 0.1.4
+- jobserver 0.1.34
+- keccak 0.1.6
+- libc 0.2.185
+- opaque-debug 0.3.1
+- p256 0.13.2
+- pem-rfc7468 0.7.0
+- pkcs8 0.10.2
+- pkg-config 0.3.33
+- poly1305 0.8.0
+- polyval 0.6.2
+- ppv-lite86 0.2.21
+- pqcrypto-dilithium 0.5.0
+- pqcrypto-internals 0.2.11
+- pqcrypto-kyber 0.8.1
+- pqcrypto-traits 0.3.5
+- primeorder 0.13.6
+- proc-macro2 1.0.106
+- quote 1.0.45
+- rand_chacha 0.3.1
+- rand_core 0.6.4
+- rfc6979 0.4.0
+- scopeguard 1.2.0
+- sec1 0.7.3
+- sha2 0.10.9
+- sha3 0.10.9
+- shlex 1.3.0
+- signature 2.2.0
+- spki 0.7.3
+- syn 2.0.117
+- thiserror 1.0.69
+- thiserror 2.0.18
+- thiserror-impl 1.0.69
+- thiserror-impl 2.0.18
+- tls_codec 0.4.2
+- tls_codec_derive 0.4.2
+- typenum 1.20.0
+- universal-hash 0.5.1
+- version_check 0.9.5
+- windows-sys 0.52.0
+- windows-targets 0.52.6
+- windows_x86_64_msvc 0.52.6
+- x509-cert 0.2.5
+- zeroize 1.8.2
+- zeroize_derive 1.4.3
+
+License expression: BSD-3-Clause
+- subtle 2.6.1
+
+License expression: GPL-3.0 OR MIT
+- unescaper 0.1.8
+
+License expression: MIT
+- generic-array 0.14.7
+- libudev 0.3.0
+- libudev-sys 0.1.4
+- nix 0.26.4
+
+License expression: MPL-2.0
+- serialport 4.9.0

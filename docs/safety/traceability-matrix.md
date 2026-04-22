@@ -262,15 +262,29 @@ Bidirectionality means the matrix supports both **forward tracing** (what does t
 
 ---
 
-## 11. Out-of-ASIL-B-Scope Error Codes
+## 11. Additional Functional Crypto Coverage
+
+The following functional crypto requirements are outside the ASIL-B FSR -> TSR
+-> SSR chain above, but they are now covered directly by known-answer or
+reproducibility tests in this repository.
+
+| Requirement | Evidence | Notes |
+|---|---|---|
+| HSM-REQ-003 | `host/tests/kat_aes_cbc.rs`, `firmware/tests/kat_aes_cbc.rs` | NIST AES-CBC vectors: CBCGFSbox256, CBCVarKey256, CBCVarTxt256, CBCMMT256 |
+| HSM-REQ-004 | `host/tests/kat_aes_ccm.rs` | NIST AES-CCM DVPT256 vectors; firmware CCM remains out of hardware scope in v0.1.0 |
+| HSM-REQ-005 | `host/tests/kat_chacha20_poly1305.rs` | RFC 8439 section 2.8.2 + 5 upstream crate corpus vectors + NonceManager non-reuse check |
+| HSM-REQ-014 | `host/tests/kat_sha3.rs` | NIST SHA3-256 and SHA3-512 short/long message vectors; software-only by design |
+| HSM-REQ-017 | `host/tests/rng_chacha_determinism.rs` | Deterministic ChaCha20Rng stream mappings from upstream `rand_chacha` commit `98a0339f99ecfe0467b2829c329bd8b7525a1c21` |
+
+---
+
+## 12. Out-of-ASIL-B-Scope Error Codes
 
 The following `HsmError` variants exist in the codebase but are **not part of the ASIL B safety claim** and therefore not traced through the FSR → TSR → SSR chain above:
 
 | Variant | Source | Reason out of scope |
 |---|---|---|
 | `ReplayDetected(u64, u64)` | `update.rs`, `feature_activation.rs` | HSM-REQ-047 (firmware update replay) is a functional requirement in Section 13 of requirements.md; it carries no ASIL designation |
-
-The `Algorithm::Aes256Cbc` and `Algorithm::Aes256Ccm` enum variants are defined for HSM-REQ-003/004 (algorithm agility) but have no corresponding `HsmBackend` method implementation. They are reserved for a future hardware protocol extension and are not safety-relevant in the current scope.
 
 ---
 

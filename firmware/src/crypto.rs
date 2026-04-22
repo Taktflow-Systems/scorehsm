@@ -11,12 +11,19 @@
 use sha2::{Digest, Sha256};
 use hmac::{Hmac, Mac};
 use hkdf::Hkdf;
+use aes::cipher::{BlockDecrypt, BlockEncrypt};
 use aes_gcm::{Aes256Gcm, Key as AesKey, Nonce, aead::{AeadInPlace, KeyInit}};
 use p256::{
     ecdsa::{SigningKey, VerifyingKey},
     PublicKey,
 };
-use rand_core::{RngCore, CryptoRng};
+use rand_core::{RngCore, CryptoRng, SeedableRng};
+
+fn seeded_chacha20_rng(rng: &mut impl RngCore) -> rand_chacha::ChaCha20Rng {
+    let mut seed = [0u8; 32];
+    rng.fill_bytes(&mut seed);
+    rand_chacha::ChaCha20Rng::from_seed(seed)
+}
 
 /// SHA-256 hash of `data`.
 pub fn sha256(data: &[u8]) -> [u8; 32] {
@@ -80,23 +87,79 @@ pub fn aes_gcm_decrypt(
     Ok(out)
 }
 
+/// AES-256-CBC encrypt without padding. `plaintext` must be block-aligned.
+#[allow(dead_code)] // Exercised via host-side KATs until the runtime wires CBC.
+pub fn aes_cbc_encrypt(
+    key: &[u8],
+    iv: &[u8; 16],
+    plaintext: &[u8],
+) -> Result<heapless::Vec<u8, 512>, ()> {
+    if plaintext.len() > 512 || !plaintext.len().is_multiple_of(16) {
+        return Err(());
+    }
+    let cipher = aes::Aes256::new_from_slice(key).map_err(|_| ())?;
+    let mut prev = *iv;
+    let mut out = heapless::Vec::new();
+    for chunk in plaintext.chunks_exact(16) {
+        let mut block = [0u8; 16];
+        for (dst, (&pt, &chaining)) in block.iter_mut().zip(chunk.iter().zip(prev.iter())) {
+            *dst = pt ^ chaining;
+        }
+        let mut ga = aes::cipher::generic_array::GenericArray::clone_from_slice(&block);
+        cipher.encrypt_block(&mut ga);
+        out.extend_from_slice(&ga).map_err(|_| ())?;
+        prev.copy_from_slice(&ga);
+    }
+    Ok(out)
+}
+
+/// AES-256-CBC decrypt without padding. `ciphertext` must be block-aligned.
+#[allow(dead_code)] // Exercised via host-side KATs until the runtime wires CBC.
+pub fn aes_cbc_decrypt(
+    key: &[u8],
+    iv: &[u8; 16],
+    ciphertext: &[u8],
+) -> Result<heapless::Vec<u8, 512>, ()> {
+    if ciphertext.len() > 512 || !ciphertext.len().is_multiple_of(16) {
+        return Err(());
+    }
+    let cipher = aes::Aes256::new_from_slice(key).map_err(|_| ())?;
+    let mut prev = *iv;
+    let mut out = heapless::Vec::new();
+    for chunk in ciphertext.chunks_exact(16) {
+        let mut ga = aes::cipher::generic_array::GenericArray::clone_from_slice(chunk);
+        let current = <[u8; 16]>::try_from(chunk).map_err(|_| ())?;
+        cipher.decrypt_block(&mut ga);
+        let mut block = [0u8; 16];
+        for (dst, (&pt, &chaining)) in block.iter_mut().zip(ga.iter().zip(prev.iter())) {
+            *dst = pt ^ chaining;
+        }
+        out.extend_from_slice(&block).map_err(|_| ())?;
+        prev = current;
+    }
+    Ok(out)
+}
+
 /// Generate an AES-256 key using `rng`. Returns 32 bytes.
 pub fn gen_aes256_key(rng: &mut impl RngCore) -> [u8; 32] {
+    let mut chacha = seeded_chacha20_rng(rng);
     let mut k = [0u8; 32];
-    rng.fill_bytes(&mut k);
+    chacha.fill_bytes(&mut k);
     k
 }
 
 /// Generate an HMAC-SHA256 key using `rng`. Returns 32 bytes.
 pub fn gen_hmac_key(rng: &mut impl RngCore) -> [u8; 32] {
+    let mut chacha = seeded_chacha20_rng(rng);
     let mut k = [0u8; 32];
-    rng.fill_bytes(&mut k);
+    chacha.fill_bytes(&mut k);
     k
 }
 
 /// Generate a P-256 private key scalar using `rng`. Returns 32 bytes.
 pub fn gen_ecc_p256_key(rng: &mut (impl RngCore + CryptoRng)) -> [u8; 32] {
-    let sk = SigningKey::random(rng);
+    let mut chacha = seeded_chacha20_rng(rng);
+    let sk = SigningKey::random(&mut chacha);
     sk.to_bytes().into()
 }
 

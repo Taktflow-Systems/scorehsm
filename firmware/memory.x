@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-FileCopyrightText: 2026 Taktflow Systems */
+
 /* STM32L552ZE — Non-Secure build (no TrustZone, full flash/RAM)
  *
  * Used when building WITHOUT the `trustzone` feature (default).

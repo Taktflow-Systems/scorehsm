@@ -36,6 +36,15 @@ pub enum HsmError {
     #[error("invalid parameter: {0}")]
     InvalidParam(String),
 
+    /// Caller-provided output buffer is too small for the requested operation.
+    #[error("buffer too small: required {required} bytes, provided {provided} bytes")]
+    BufferTooSmall {
+        /// Minimum buffer size needed to complete the operation.
+        required: usize,
+        /// Buffer size supplied by the caller.
+        provided: usize,
+    },
+
     /// Operation not supported by the active backend.
     #[error("operation not supported by this backend")]
     Unsupported,

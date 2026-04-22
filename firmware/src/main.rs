@@ -10,11 +10,17 @@
 //! USB CDC task: receives frames from the host (Pi), dispatches crypto
 //! operations, and sends responses back over the same CDC interface.
 
-#![no_std]
-#![no_main]
+#![cfg_attr(all(target_arch = "arm", target_os = "none"), no_std)]
+#![cfg_attr(all(target_arch = "arm", target_os = "none"), no_main)]
 
+#[cfg(not(all(target_arch = "arm", target_os = "none")))]
+fn main() {}
+
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 use defmt::*;
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 use embassy_executor::Spawner;
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 use embassy_stm32::{
     bind_interrupts,
     gpio::{Level, Output, Speed},
@@ -23,25 +29,34 @@ use embassy_stm32::{
     usb::Driver as UsbDriver,
     wdg::IndependentWatchdog,
 };
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 use embassy_usb::{
     class::cdc_acm::{CdcAcmClass, State},
     Builder, UsbDevice,
 };
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 use embassy_futures::join::join3;
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 use embassy_time::Timer;
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 use static_cell::StaticCell;
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 use {defmt_rtt as _, panic_probe as _};
 
 mod crypto;
 mod keystore;
 mod protocol;
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 mod trustzone;
 
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 use keystore::{KeyStore, KeyHandle, KeyType};
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 use protocol::{Cmd, Rsp, ParseError, FRAME_OVERHEAD, MAX_FRAME, MAX_PAYLOAD};
 
 // ── Embassy interrupt bindings ────────────────────────────────────────────────
 
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 bind_interrupts!(struct Irqs {
     USB_FS => embassy_stm32::usb::InterruptHandler<peripherals::USB>;
     RNG    => rng::InterruptHandler<peripherals::RNG>;
@@ -49,12 +64,14 @@ bind_interrupts!(struct Irqs {
 
 // ── Key store (static, in SRAM2 ideally — linker section) ────────────────────
 
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 static mut KEY_STORE: KeyStore = KeyStore::new();
 
 // ── USB buffer allocations ────────────────────────────────────────────────────
 
 // ── Main entry ────────────────────────────────────────────────────────────────
 
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     // ── RCC config: 80 MHz system + HSI48 for USB (per Embassy L5 example) ──
@@ -153,6 +170,7 @@ async fn main(_spawner: Spawner) {
 
 // ── USB device driver task ────────────────────────────────────────────────────
 
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 async fn usb_run<D: embassy_usb::driver::Driver<'static>>(
     mut usb: UsbDevice<'static, D>,
 ) -> ! {
@@ -161,6 +179,7 @@ async fn usb_run<D: embassy_usb::driver::Driver<'static>>(
 
 // ── Watchdog task ─────────────────────────────────────────────────────────────
 
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 async fn watchdog_run<'d>(mut wdg: IndependentWatchdog<'d, peripherals::IWDG>) -> ! {
     info!("Watchdog task started");
     loop {
@@ -171,6 +190,7 @@ async fn watchdog_run<'d>(mut wdg: IndependentWatchdog<'d, peripherals::IWDG>) -
 
 // ── HSM dispatcher task ───────────────────────────────────────────────────────
 
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 async fn hsm_run<'d, D: embassy_usb::driver::Driver<'d>>(
     mut class: CdcAcmClass<'d, D>,
     mut hw_rng: Rng<'d, peripherals::RNG>,
@@ -282,6 +302,7 @@ async fn hsm_run<'d, D: embassy_usb::driver::Driver<'d>>(
 
 // ── Command dispatcher ────────────────────────────────────────────────────────
 
+#[cfg(all(target_arch = "arm", target_os = "none"))]
 fn dispatch(
     cmd: Cmd,
     _seq: u32,

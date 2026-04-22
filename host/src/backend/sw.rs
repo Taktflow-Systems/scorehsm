@@ -60,6 +60,211 @@ pub struct SoftwareBackend {
     keys: HashMap<u32, KeyMaterial>,
 }
 
+fn seeded_chacha20_rng() -> rand_chacha::ChaCha20Rng {
+    use rand_chacha::ChaCha20Rng;
+    use rand_core::{OsRng, RngCore, SeedableRng};
+
+    let mut seed = [0u8; 32];
+    OsRng.fill_bytes(&mut seed);
+    ChaCha20Rng::from_seed(seed)
+}
+
+fn aes_cbc_encrypt_raw(raw: &[u8; 32], iv: &[u8; 16], plaintext: &[u8]) -> HsmResult<Vec<u8>> {
+    use aes::cipher::{BlockEncrypt, KeyInit};
+
+    if !plaintext.len().is_multiple_of(16) {
+        return Err(HsmError::InvalidParam(
+            "AES-CBC plaintext must be a multiple of 16 bytes".into(),
+        ));
+    }
+
+    let cipher = aes::Aes256::new_from_slice(raw)
+        .map_err(|e| HsmError::CryptoFail(e.to_string()))?;
+    let mut prev = *iv;
+    let mut out = Vec::with_capacity(plaintext.len());
+
+    for chunk in plaintext.chunks_exact(16) {
+        let mut block = [0u8; 16];
+        for (dst, (&pt, &chaining)) in block.iter_mut().zip(chunk.iter().zip(prev.iter())) {
+            *dst = pt ^ chaining;
+        }
+        let mut ga = aes::cipher::generic_array::GenericArray::clone_from_slice(&block);
+        cipher.encrypt_block(&mut ga);
+        out.extend_from_slice(&ga);
+        prev.copy_from_slice(&ga);
+    }
+
+    Ok(out)
+}
+
+fn aes_cbc_decrypt_raw(raw: &[u8; 32], iv: &[u8; 16], ciphertext: &[u8]) -> HsmResult<Vec<u8>> {
+    use aes::cipher::{BlockDecrypt, KeyInit};
+
+    if !ciphertext.len().is_multiple_of(16) {
+        return Err(HsmError::InvalidParam(
+            "AES-CBC ciphertext must be a multiple of 16 bytes".into(),
+        ));
+    }
+
+    let cipher = aes::Aes256::new_from_slice(raw)
+        .map_err(|e| HsmError::CryptoFail(e.to_string()))?;
+    let mut prev = *iv;
+    let mut out = Vec::with_capacity(ciphertext.len());
+
+    for chunk in ciphertext.chunks_exact(16) {
+        let mut ga = aes::cipher::generic_array::GenericArray::clone_from_slice(chunk);
+        let current = <[u8; 16]>::try_from(chunk)
+            .map_err(|_| HsmError::CryptoFail("invalid AES-CBC block size".into()))?;
+        cipher.decrypt_block(&mut ga);
+        let mut block = [0u8; 16];
+        for (dst, (&pt, &chaining)) in block.iter_mut().zip(ga.iter().zip(prev.iter())) {
+            *dst = pt ^ chaining;
+        }
+        out.extend_from_slice(&block);
+        prev = current;
+    }
+
+    Ok(out)
+}
+
+fn aes_ccm_encrypt_impl<N, T>(
+    raw: &[u8; 32],
+    nonce: &[u8],
+    aad: &[u8],
+    plaintext: &[u8],
+) -> HsmResult<Vec<u8>>
+where
+    N: ccm::aead::generic_array::ArrayLength<u8> + ccm::NonceSize,
+    T: ccm::aead::generic_array::ArrayLength<u8> + ccm::TagSize,
+{
+    use ccm::{
+        aead::{generic_array::GenericArray, AeadInPlace, KeyInit},
+        Ccm,
+    };
+
+    let cipher = Ccm::<aes::Aes256, T, N>::new_from_slice(raw)
+        .map_err(|e| HsmError::CryptoFail(e.to_string()))?;
+    let nonce = GenericArray::<u8, N>::from_slice(nonce);
+    let mut buf = plaintext.to_vec();
+    let tag = cipher
+        .encrypt_in_place_detached(nonce, aad, &mut buf)
+        .map_err(|e| HsmError::CryptoFail(e.to_string()))?;
+    buf.extend_from_slice(&tag);
+    Ok(buf)
+}
+
+fn aes_ccm_decrypt_impl<N, T>(
+    raw: &[u8; 32],
+    nonce: &[u8],
+    aad: &[u8],
+    ciphertext_and_tag: &[u8],
+    tag_len: usize,
+) -> HsmResult<Vec<u8>>
+where
+    N: ccm::aead::generic_array::ArrayLength<u8> + ccm::NonceSize,
+    T: ccm::aead::generic_array::ArrayLength<u8> + ccm::TagSize,
+{
+    use ccm::{
+        aead::{generic_array::GenericArray, AeadInPlace, KeyInit},
+        Ccm,
+    };
+
+    let split = ciphertext_and_tag
+        .len()
+        .checked_sub(tag_len)
+        .ok_or_else(|| HsmError::InvalidParam("AES-CCM ciphertext shorter than tag".into()))?;
+    let cipher = Ccm::<aes::Aes256, T, N>::new_from_slice(raw)
+        .map_err(|e| HsmError::CryptoFail(e.to_string()))?;
+    let nonce = GenericArray::<u8, N>::from_slice(nonce);
+    let tag = GenericArray::<u8, T>::clone_from_slice(&ciphertext_and_tag[split..]);
+    let mut buf = ciphertext_and_tag[..split].to_vec();
+    cipher
+        .decrypt_in_place_detached(nonce, aad, &mut buf, &tag)
+        .map_err(|_| HsmError::TagMismatch)?;
+    Ok(buf)
+}
+
+macro_rules! aes_ccm_tag_dispatch {
+    ($nonce_ty:ty, $raw:expr, $nonce:expr, $aad:expr, $payload:expr, $tag_len:expr, encrypt) => {{
+        use aes::cipher::consts::{U10, U12, U14, U16, U4, U6, U8};
+
+        match $tag_len {
+            4 => aes_ccm_encrypt_impl::<$nonce_ty, U4>($raw, $nonce, $aad, $payload),
+            6 => aes_ccm_encrypt_impl::<$nonce_ty, U6>($raw, $nonce, $aad, $payload),
+            8 => aes_ccm_encrypt_impl::<$nonce_ty, U8>($raw, $nonce, $aad, $payload),
+            10 => aes_ccm_encrypt_impl::<$nonce_ty, U10>($raw, $nonce, $aad, $payload),
+            12 => aes_ccm_encrypt_impl::<$nonce_ty, U12>($raw, $nonce, $aad, $payload),
+            14 => aes_ccm_encrypt_impl::<$nonce_ty, U14>($raw, $nonce, $aad, $payload),
+            16 => aes_ccm_encrypt_impl::<$nonce_ty, U16>($raw, $nonce, $aad, $payload),
+            _ => Err(HsmError::InvalidParam(format!(
+                "unsupported AES-CCM tag length: {}",
+                $tag_len
+            ))),
+        }
+    }};
+    ($nonce_ty:ty, $raw:expr, $nonce:expr, $aad:expr, $payload:expr, $tag_len:expr, decrypt) => {{
+        use aes::cipher::consts::{U10, U12, U14, U16, U4, U6, U8};
+
+        match $tag_len {
+            4 => aes_ccm_decrypt_impl::<$nonce_ty, U4>($raw, $nonce, $aad, $payload, $tag_len),
+            6 => aes_ccm_decrypt_impl::<$nonce_ty, U6>($raw, $nonce, $aad, $payload, $tag_len),
+            8 => aes_ccm_decrypt_impl::<$nonce_ty, U8>($raw, $nonce, $aad, $payload, $tag_len),
+            10 => aes_ccm_decrypt_impl::<$nonce_ty, U10>($raw, $nonce, $aad, $payload, $tag_len),
+            12 => aes_ccm_decrypt_impl::<$nonce_ty, U12>($raw, $nonce, $aad, $payload, $tag_len),
+            14 => aes_ccm_decrypt_impl::<$nonce_ty, U14>($raw, $nonce, $aad, $payload, $tag_len),
+            16 => aes_ccm_decrypt_impl::<$nonce_ty, U16>($raw, $nonce, $aad, $payload, $tag_len),
+            _ => Err(HsmError::InvalidParam(format!(
+                "unsupported AES-CCM tag length: {}",
+                $tag_len
+            ))),
+        }
+    }};
+}
+
+fn aes_ccm_encrypt_raw(
+    raw: &[u8; 32],
+    nonce: &[u8],
+    aad: &[u8],
+    plaintext: &[u8],
+    tag_len: usize,
+) -> HsmResult<Vec<u8>> {
+    match nonce.len() {
+        7 => aes_ccm_tag_dispatch!(aes::cipher::consts::U7, raw, nonce, aad, plaintext, tag_len, encrypt),
+        8 => aes_ccm_tag_dispatch!(aes::cipher::consts::U8, raw, nonce, aad, plaintext, tag_len, encrypt),
+        9 => aes_ccm_tag_dispatch!(aes::cipher::consts::U9, raw, nonce, aad, plaintext, tag_len, encrypt),
+        10 => aes_ccm_tag_dispatch!(aes::cipher::consts::U10, raw, nonce, aad, plaintext, tag_len, encrypt),
+        11 => aes_ccm_tag_dispatch!(aes::cipher::consts::U11, raw, nonce, aad, plaintext, tag_len, encrypt),
+        12 => aes_ccm_tag_dispatch!(aes::cipher::consts::U12, raw, nonce, aad, plaintext, tag_len, encrypt),
+        13 => aes_ccm_tag_dispatch!(aes::cipher::consts::U13, raw, nonce, aad, plaintext, tag_len, encrypt),
+        _ => Err(HsmError::InvalidParam(format!(
+            "unsupported AES-CCM nonce length: {}",
+            nonce.len()
+        ))),
+    }
+}
+
+fn aes_ccm_decrypt_raw(
+    raw: &[u8; 32],
+    nonce: &[u8],
+    aad: &[u8],
+    ciphertext_and_tag: &[u8],
+    tag_len: usize,
+) -> HsmResult<Vec<u8>> {
+    match nonce.len() {
+        7 => aes_ccm_tag_dispatch!(aes::cipher::consts::U7, raw, nonce, aad, ciphertext_and_tag, tag_len, decrypt),
+        8 => aes_ccm_tag_dispatch!(aes::cipher::consts::U8, raw, nonce, aad, ciphertext_and_tag, tag_len, decrypt),
+        9 => aes_ccm_tag_dispatch!(aes::cipher::consts::U9, raw, nonce, aad, ciphertext_and_tag, tag_len, decrypt),
+        10 => aes_ccm_tag_dispatch!(aes::cipher::consts::U10, raw, nonce, aad, ciphertext_and_tag, tag_len, decrypt),
+        11 => aes_ccm_tag_dispatch!(aes::cipher::consts::U11, raw, nonce, aad, ciphertext_and_tag, tag_len, decrypt),
+        12 => aes_ccm_tag_dispatch!(aes::cipher::consts::U12, raw, nonce, aad, ciphertext_and_tag, tag_len, decrypt),
+        13 => aes_ccm_tag_dispatch!(aes::cipher::consts::U13, raw, nonce, aad, ciphertext_and_tag, tag_len, decrypt),
+        _ => Err(HsmError::InvalidParam(format!(
+            "unsupported AES-CCM nonce length: {}",
+            nonce.len()
+        ))),
+    }
+}
+
 impl SoftwareBackend {
     /// Create a new software backend instance.
     pub fn new() -> Self {
@@ -107,22 +312,24 @@ impl HsmBackend for SoftwareBackend {
 
     fn key_generate(&mut self, key_type: KeyType) -> HsmResult<KeyHandle> {
         self.check_init()?;
-        use rand_core::{OsRng, RngCore};
+        use rand_core::RngCore;
+
+        let mut rng = seeded_chacha20_rng();
 
         let material = match key_type {
             KeyType::Aes256 => {
                 let mut key = [0u8; 32];
-                OsRng.fill_bytes(&mut key);
+                rng.fill_bytes(&mut key);
                 KeyMaterial::Aes256(key)
             }
             KeyType::HmacSha256 => {
                 let mut key = [0u8; 32];
-                OsRng.fill_bytes(&mut key);
+                rng.fill_bytes(&mut key);
                 KeyMaterial::HmacSha256(key)
             }
             KeyType::EccP256 => {
                 use p256::ecdsa::SigningKey;
-                let signing_key = SigningKey::random(&mut OsRng);
+                let signing_key = SigningKey::random(&mut rng);
                 let bytes: [u8; 32] = signing_key.to_bytes().into();
                 KeyMaterial::EccP256(bytes)
             }
@@ -293,6 +500,135 @@ impl HsmBackend for SoftwareBackend {
             .map_err(|_| HsmError::TagMismatch)
     }
 
+    fn aes_cbc_encrypt(
+        &self,
+        handle: KeyHandle,
+        iv: &[u8; 16],
+        plaintext: &[u8],
+    ) -> HsmResult<Vec<u8>> {
+        self.check_init()?;
+        let key = self.keys.get(&handle.0).ok_or(HsmError::InvalidKeyHandle)?;
+        let raw = match key {
+            KeyMaterial::Aes256(k) => k,
+            _ => return Err(HsmError::InvalidKeyHandle),
+        };
+        aes_cbc_encrypt_raw(raw, iv, plaintext)
+    }
+
+    fn aes_cbc_decrypt(
+        &self,
+        handle: KeyHandle,
+        iv: &[u8; 16],
+        ciphertext: &[u8],
+    ) -> HsmResult<Vec<u8>> {
+        self.check_init()?;
+        let key = self.keys.get(&handle.0).ok_or(HsmError::InvalidKeyHandle)?;
+        let raw = match key {
+            KeyMaterial::Aes256(k) => k,
+            _ => return Err(HsmError::InvalidKeyHandle),
+        };
+        aes_cbc_decrypt_raw(raw, iv, ciphertext)
+    }
+
+    fn aes_ccm_encrypt(
+        &self,
+        handle: KeyHandle,
+        nonce: &[u8],
+        aad: &[u8],
+        plaintext: &[u8],
+        tag_len: usize,
+    ) -> HsmResult<Vec<u8>> {
+        self.check_init()?;
+        let key = self.keys.get(&handle.0).ok_or(HsmError::InvalidKeyHandle)?;
+        let raw = match key {
+            KeyMaterial::Aes256(k) => k,
+            _ => return Err(HsmError::InvalidKeyHandle),
+        };
+        aes_ccm_encrypt_raw(raw, nonce, aad, plaintext, tag_len)
+    }
+
+    fn aes_ccm_decrypt(
+        &self,
+        handle: KeyHandle,
+        nonce: &[u8],
+        aad: &[u8],
+        ciphertext_and_tag: &[u8],
+        tag_len: usize,
+    ) -> HsmResult<Vec<u8>> {
+        self.check_init()?;
+        let key = self.keys.get(&handle.0).ok_or(HsmError::InvalidKeyHandle)?;
+        let raw = match key {
+            KeyMaterial::Aes256(k) => k,
+            _ => return Err(HsmError::InvalidKeyHandle),
+        };
+        aes_ccm_decrypt_raw(raw, nonce, aad, ciphertext_and_tag, tag_len)
+    }
+
+    fn chacha20_poly1305_encrypt(
+        &self,
+        handle: KeyHandle,
+        nonce: &[u8; 12],
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> HsmResult<(Vec<u8>, [u8; 16])> {
+        self.check_init()?;
+        let key = self.keys.get(&handle.0).ok_or(HsmError::InvalidKeyHandle)?;
+        let raw = match key {
+            KeyMaterial::Aes256(k) => k,
+            _ => return Err(HsmError::InvalidKeyHandle),
+        };
+        use chacha20poly1305::{
+            aead::{Aead, KeyInit, Payload},
+            ChaCha20Poly1305, Nonce,
+        };
+        let cipher = ChaCha20Poly1305::new_from_slice(raw)
+            .map_err(|e| HsmError::CryptoFail(e.to_string()))?;
+        let payload = Payload {
+            msg: plaintext,
+            aad,
+        };
+        let result = cipher
+            .encrypt(Nonce::from_slice(nonce), payload)
+            .map_err(|e| HsmError::CryptoFail(e.to_string()))?;
+        let tag_offset = result.len() - 16;
+        let mut tag = [0u8; 16];
+        tag.copy_from_slice(&result[tag_offset..]);
+        Ok((result[..tag_offset].to_vec(), tag))
+    }
+
+    fn chacha20_poly1305_decrypt(
+        &self,
+        handle: KeyHandle,
+        nonce: &[u8; 12],
+        aad: &[u8],
+        ciphertext: &[u8],
+        tag: &[u8; 16],
+    ) -> HsmResult<Vec<u8>> {
+        self.check_init()?;
+        let key = self.keys.get(&handle.0).ok_or(HsmError::InvalidKeyHandle)?;
+        let raw = match key {
+            KeyMaterial::Aes256(k) => k,
+            _ => return Err(HsmError::InvalidKeyHandle),
+        };
+        use chacha20poly1305::{
+            aead::{Aead, KeyInit, Payload},
+            ChaCha20Poly1305, Nonce,
+        };
+        let cipher = ChaCha20Poly1305::new_from_slice(raw)
+            .map_err(|e| HsmError::CryptoFail(e.to_string()))?;
+        let mut ct_with_tag = ciphertext.to_vec();
+        ct_with_tag.extend_from_slice(tag);
+        cipher
+            .decrypt(
+                Nonce::from_slice(nonce),
+                Payload {
+                    msg: &ct_with_tag,
+                    aad,
+                },
+            )
+            .map_err(|_| HsmError::TagMismatch)
+    }
+
     fn ecdsa_sign(&self, handle: KeyHandle, digest: &[u8; 32]) -> HsmResult<EcdsaSignature> {
         self.check_init()?;
         let key = self.keys.get(&handle.0).ok_or(HsmError::InvalidKeyHandle)?;
@@ -394,5 +730,23 @@ impl HsmBackend for SoftwareBackend {
         let mut out = [0u8; 32];
         out.copy_from_slice(shared.raw_secret_bytes());
         Ok(out)
+    }
+
+    fn sha3_256(&self, data: &[u8]) -> HsmResult<[u8; 32]> {
+        self.check_init()?;
+        use sha3::{Digest, Sha3_256};
+
+        let mut hasher = Sha3_256::new();
+        hasher.update(data);
+        Ok(hasher.finalize().into())
+    }
+
+    fn sha3_512(&self, data: &[u8]) -> HsmResult<[u8; 64]> {
+        self.check_init()?;
+        use sha3::{Digest, Sha3_512};
+
+        let mut hasher = Sha3_512::new();
+        hasher.update(data);
+        Ok(hasher.finalize().into())
     }
 }

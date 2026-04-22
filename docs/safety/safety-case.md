@@ -1,6 +1,6 @@
 # scorehsm — Safety Case (GSN Structured Argument)
 
-Date: 2026-03-14
+Date: 2026-04-22
 Status: CONDITIONALLY VALID
 ASIL Target: ASIL B
 Classification: SEooC (Safety Element out of Context)
@@ -149,21 +149,22 @@ G1 (top-level ASIL B claim)
 
 ---
 
-### G5 — Structural Coverage: Statement ≥85%, Branch ≥80%
+### G5 - Structural Coverage: Statement >=85%, Branch >=80%
 
-**Claim:** The test suite achieves statement coverage ≥85% and branch coverage ≥80% over the `scorehsm-host` library, satisfying ISO 26262-6 Clause 11 structural coverage targets for ASIL B.
+**Claim:** The test suite achieves statement coverage >=85% and branch coverage >=80% over the scorehsm-host library, satisfying ISO 26262-6 Clause 11 structural coverage targets for ASIL B.
 
 **Evidence:**
-- `docs/test-strategy/test-strategy.md` — 110 passing tests across all test modules
-- Coverage measurement infrastructure: `cargo-llvm-cov` integrated in CI (`target/llvm-cov/` output directory)
-- Coverage targets are enforced as CI gates on the `main` branch (CI fails if coverage drops below threshold)
-- Current coverage measurement status: **pending execution on Linux CI runner** (see UC-02 in Section 8)
+- docs/test-strategy/test-strategy.md - repository test strategy and structural-coverage intent
+- coverage-summary.json - recorded line coverage of 92.54%
+- branch-coverage-summary.json - recorded branch coverage of 83.33%
+- .github/workflows/ci.yml - stable line/function gate plus nightly branch gate in the host-coverage job
+- docs/safety/tool-qualification-records.md T3 - TCL-2 validation for cargo-llvm-cov complete
 
-**Current state:** Coverage measurement requires a Linux CI runner. The test density (123 tests covering 77 requirements, with boundary value, error injection, fault injection, and negative tests throughout) is expected to meet the ≥85%/≥80% targets based on engineering judgment. Formal measurement is a declared open item (OI-03 in safety-plan.md).
+**Current state:** G5 is now directly supported by measured coverage evidence rather than engineering estimate. The repository-level line target (>=85%) and branch target (>=80%) are both met.
 
-**MC/DC tailoring:** MC/DC coverage analysis is tailored away at ASIL B per the safety plan (§4.1). Branch coverage is the primary structural coverage criterion at ASIL B. This tailoring is consistent with ISO 26262-6 Table 10, where MC/DC is recommended (++) at ASIL C/D but branch coverage is the ASIL B target.
+**MC/DC tailoring:** MC/DC coverage analysis remains tailored away at ASIL B per the safety plan (Section 4.1). Branch coverage is the primary structural coverage criterion at ASIL B.
 
-**Tool confidence:** `cargo-llvm-cov` is classified TCL-2 (`docs/safety/tool-qualification-records.md` T3). A validation exercise against known coverage ground truth is required before the first release (OI-02/TQR-OI-02). Until TCL-2 validation is complete, coverage reports are treated as indicative, not as release-blocking evidence.
+**Tool confidence:** cargo-llvm-cov remains classified TCL-2. The validation exercise against tools/coverage-kat/ is complete, so the coverage reports are admissible as release evidence.
 
 ---
 
@@ -307,13 +308,13 @@ The following claims are not yet fully supported by evidence as of the date of t
 
 **Impact on G1:** G1 sub-claims G2 and G3 are partially undeveloped for hardware-isolation failure modes. The software-layer safety functions (SC-01 through SC-04, G2 software requirements, G3 software failure modes) are fully supported. The hardware boundary argument (SC-03 for `HardwareBackend`) is conditionally supported pending UC-01 completion. Phase 10b provides partial evidence for HSM-REQ-034, HSM-REQ-041, and HSM-REQ-016.
 
-### UC-02 — Coverage Measurement on Linux CI
+### UC-02 - Coverage Measurement on Linux CI
 
-**Scope:** Structural coverage measurement (statement ≥85%, branch ≥80%) has not yet been executed and reported. The `cargo-llvm-cov` tool is integrated and ready; measurement requires a Linux CI runner to avoid the `pqc` feature linker issue on Windows.
+**Scope:** Structural coverage measurement (statement >=85%, branch >=80%) for the host library.
 
-**Status:** Open item OI-03 in safety-plan.md. Expected completion: 2026-04-30.
+**Status:** Closed 2026-04-22. Recorded results are 92.54% line coverage and 83.33% branch coverage, with the TCL-2 validation for cargo-llvm-cov also closed.
 
-**Impact on G5:** G5 is asserted based on test density engineering judgment. Formal coverage evidence is not yet available. G5 becomes fully supported when Linux CI produces a passing coverage report.
+**Impact on G5:** None remaining. G5 is fully supported by measured evidence.
 
 ### UC-03 — T1 Independence Verification
 
@@ -329,28 +330,24 @@ The following claims are not yet fully supported by evidence as of the date of t
 
 | Claim | Status | Conditions |
 |---|---|---|
-| G1 — ASIL B top-level claim | CONDITIONALLY VALID | ASRs satisfied; UC-01, UC-02, UC-03, TQR OIs complete |
-| G2 — All 77 requirements verified | CONDITIONALLY VALID | Software layer: complete (77/77 specified). HIL requirements: UC-01 pending |
-| G3 — No unmitigated S3 failure modes | CONDITIONALLY VALID | Software layer: complete. Hardware-boundary FM mitigations: UC-01 pending |
-| G4 — Coding guidelines enforced | VALID | Compile-time and CI enforcement in place; 0 warnings in mock backend |
-| G5 — Coverage targets met | CONDITIONALLY VALID | 123 tests in place; formal measurement pending UC-02 |
-| G6 — TARA complete; SG/FSR/TSR/SSR traced | VALID | Full V-model chain: SG→FSR→TSR→SSR→test (SCORE-UTT/ITP/QTE) |
-| G7 — ASRs documented and communicated | VALID | assumed-safety-requirements.md — 12 ASRs; safety-plan.md §3 — 4 ASGs |
-| SC-01 (false-accept rate = 0) | VALID for software backend | audited `p256` crate + NIST vectors + constant-time; HSM-REQ-072,073 |
-| SC-02 (no plaintext on tag mismatch) | VALID for software backend | `test_aead_auth_failure_returns_error_not_partial_plaintext` passes |
-| SC-03 (key material never exposed via API) | CONDITIONALLY VALID | HardwareBackend: ASR-HW-02 (SWD lock) required; SoftwareBackend: excluded |
-| SC-04 (version monotonicity enforced) | VALID | `verify_update_image` tests cover all rollback cases |
+| G1 - ASIL B top-level claim | CONDITIONALLY VALID | ASRs satisfied; UC-01 and UC-03 remain open outside repository-owned software evidence |
+| G2 - All 77 requirements verified | CONDITIONALLY VALID | Software layer complete; HIL requirements remain under UC-01 |
+| G3 - No unmitigated S3 failure modes | CONDITIONALLY VALID | Software layer complete; hardware-boundary FM mitigations remain under UC-01 |
+| G4 - Coding guidelines enforced | VALID | Compile-time and CI enforcement in place |
+| G5 - Coverage targets met | VALID | 92.54% line coverage and 83.33% branch coverage recorded; T3 closed |
+| G6 - TARA complete; SG/FSR/TSR/SSR traced | VALID | Full V-model chain maintained |
+| G7 - ASRs documented and communicated | VALID | Integrator obligations documented and deferred where appropriate |
+| SC-01 (false-accept rate = 0) | VALID for software backend | audited p256 crate plus vectors and negative tests |
+| SC-02 (no plaintext on tag mismatch) | VALID for software backend | auth-failure tests pass |
+| SC-03 (key material never exposed via API) | CONDITIONALLY VALID | HardwareBackend still depends on hardware evidence and ASR-HW-02 |
+| SC-04 (version monotonicity enforced) | VALID | update verification and mutation testing both cover rollback logic |
 
-**Overall verdict:** The ASIL B claim for `scorehsm` is **CONDITIONALLY VALID** as of 2026-03-14.
-
-The V-model is **complete at specification and test-plan level** (Steps 1–16 of the ISO 26262-6 V-model process). All 16 FSRs and all 28 SSRs are specified; 52 integration tests and 57 qualification tests are defined; DFA, tool qualification records, and safety case are all updated.
+**Overall verdict:** The ASIL B claim for scorehsm is **CONDITIONALLY VALID** as of 2026-04-22.
 
 The claim becomes fully VALID upon:
 1. **UC-01**: HIL test execution and reporting for hardware-layer requirements
-2. **UC-02**: Coverage measurement on Linux CI confirming ≥85%/≥80% targets
-3. **UC-03**: T1 independence sign-off for v0.1.0 release
-4. **TQR-OI-01..03**: Tool qualification open items closed
-5. **ASR-HW-01..05, ASR-OS-01..03, ASR-INT-01..04**: Verified by integrator
+2. **UC-03**: T1 independence sign-off for v0.1.0 release
+3. **ASR-HW-01..05, ASR-OS-01..03, ASR-INT-01..04**: replaced with real downstream integrator evidence
 
 ---
 
@@ -358,11 +355,9 @@ The claim becomes fully VALID upon:
 
 | ID | Item | Impact | Target |
 |---|---|---|---|
-| OI-04 | This safety case — initial version | Satisfies safety-plan.md OI-04 | 2026-03-14 (complete — this document) |
+| OI-04 | This safety case - maintained revision | Repository safety argument remains current | Closed 2026-04-22 |
 | OI-06 | HIL test execution | Required to close UC-01 and fully support G2/G3 hardware claims | 2026-05-15 |
-| OI-03 | Coverage measurement on Linux CI | Required to close UC-02 and fully support G5 | 2026-04-30 |
-| OI-02 | TCL-2 validation for `cargo-llvm-cov` | Required before coverage reports are used as release-blocking evidence | 2026-04-01 |
-| FMEA-OI-1 | Mutation testing for FM-019, FM-029, FM-031 | Strengthens G3 evidence for the three failure modes with mutation test coverage planned | 2026-04-15 |
+| OI-08 | T1-independent release review | Required to close UC-03 for a full ASIL B release claim | Before v0.1.0 |
 | FMEA-OI-2 | Hardware backend zeroize verification (FM-008) | Closes the HIL gap in G3 for the FM-008 zeroize mitigation | 2026-05-15 |
 
 ---

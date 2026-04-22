@@ -3,7 +3,7 @@
 
 //! Backend abstraction — software fallback and hardware (USB/L55).
 
-use crate::error::HsmResult;
+use crate::error::{HsmError, HsmResult};
 use crate::types::{AesGcmParams, BootStatus, EcdsaSignature, KeyHandle, KeyType};
 
 pub mod sw;
@@ -17,6 +17,10 @@ pub mod mock;
 /// Core backend trait — implemented by both software fallback and hardware backend.
 ///
 /// All operations use key handles. Key material never crosses this interface.
+/// The current Rust API returns owned outputs, so caller-visible short-buffer
+/// failures are expected at the FFI boundary rather than inside these trait
+/// methods. Any future API that writes into caller-provided buffers must use
+/// `HsmError::BufferTooSmall` instead of overloading `InvalidParam`.
 pub trait HsmBackend: Send + Sync {
     /// Initialize the backend.
     fn init(&mut self) -> HsmResult<()>;
@@ -80,6 +84,85 @@ pub trait HsmBackend: Send + Sync {
         tag: &[u8; 16],
     ) -> HsmResult<Vec<u8>>;
 
+    /// AES-256-CBC encrypt.
+    ///
+    /// `plaintext` must be a whole number of AES blocks (16 bytes each).
+    fn aes_cbc_encrypt(
+        &self,
+        _handle: KeyHandle,
+        _iv: &[u8; 16],
+        _plaintext: &[u8],
+    ) -> HsmResult<Vec<u8>> {
+        Err(HsmError::Unsupported)
+    }
+
+    /// AES-256-CBC decrypt.
+    ///
+    /// `ciphertext` must be a whole number of AES blocks (16 bytes each).
+    fn aes_cbc_decrypt(
+        &self,
+        _handle: KeyHandle,
+        _iv: &[u8; 16],
+        _ciphertext: &[u8],
+    ) -> HsmResult<Vec<u8>> {
+        Err(HsmError::Unsupported)
+    }
+
+    /// AES-256-CCM encrypt.
+    ///
+    /// Returns `ciphertext || tag`, with `tag_len` bytes of authentication tag
+    /// appended to the ciphertext to match the NIST CCM vector format.
+    fn aes_ccm_encrypt(
+        &self,
+        _handle: KeyHandle,
+        _nonce: &[u8],
+        _aad: &[u8],
+        _plaintext: &[u8],
+        _tag_len: usize,
+    ) -> HsmResult<Vec<u8>> {
+        Err(HsmError::Unsupported)
+    }
+
+    /// AES-256-CCM decrypt.
+    ///
+    /// `ciphertext_and_tag` must contain the authentication tag as the trailing
+    /// `tag_len` bytes.
+    fn aes_ccm_decrypt(
+        &self,
+        _handle: KeyHandle,
+        _nonce: &[u8],
+        _aad: &[u8],
+        _ciphertext_and_tag: &[u8],
+        _tag_len: usize,
+    ) -> HsmResult<Vec<u8>> {
+        Err(HsmError::Unsupported)
+    }
+
+    /// ChaCha20-Poly1305 encrypt.
+    ///
+    /// Returns (ciphertext, tag). Ciphertext is the same length as plaintext.
+    fn chacha20_poly1305_encrypt(
+        &self,
+        _handle: KeyHandle,
+        _nonce: &[u8; 12],
+        _aad: &[u8],
+        _plaintext: &[u8],
+    ) -> HsmResult<(Vec<u8>, [u8; 16])> {
+        Err(HsmError::Unsupported)
+    }
+
+    /// ChaCha20-Poly1305 decrypt and verify.
+    fn chacha20_poly1305_decrypt(
+        &self,
+        _handle: KeyHandle,
+        _nonce: &[u8; 12],
+        _aad: &[u8],
+        _ciphertext: &[u8],
+        _tag: &[u8; 16],
+    ) -> HsmResult<Vec<u8>> {
+        Err(HsmError::Unsupported)
+    }
+
     /// ECDSA P-256 sign. Signs a pre-computed SHA-256 digest (32 bytes).
     fn ecdsa_sign(&self, handle: KeyHandle, digest: &[u8; 32]) -> HsmResult<EcdsaSignature>;
 
@@ -101,6 +184,16 @@ pub trait HsmBackend: Send + Sync {
 
     /// ECDH P-256 key agreement. Returns the shared secret (32 bytes).
     fn ecdh_agree(&self, handle: KeyHandle, peer_pub: &[u8; 64]) -> HsmResult<[u8; 32]>;
+
+    /// SHA3-256 hash.
+    fn sha3_256(&self, _data: &[u8]) -> HsmResult<[u8; 32]> {
+        Err(HsmError::Unsupported)
+    }
+
+    /// SHA3-512 hash.
+    fn sha3_512(&self, _data: &[u8]) -> HsmResult<[u8; 64]> {
+        Err(HsmError::Unsupported)
+    }
 
     /// Query secure boot status — HSM-REQ-046.
     ///
